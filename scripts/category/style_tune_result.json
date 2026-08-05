@@ -1,0 +1,15 @@
+{
+  "best_C": 3.0,
+  "best_acc": 0.768,
+  "style_cols": [
+    "text_len_log",
+    "excl_density",
+    "caps_word_count",
+    "informal_greeting",
+    "formal_greeting",
+    "family_words",
+    "formal_closing",
+    "informal_closing",
+    "question_count"
+  ]
+}

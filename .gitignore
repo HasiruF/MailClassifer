@@ -1,0 +1,41 @@
+# Raw corpora — large, downloadable/regenerable, not source
+Enron/
+Enron.zip
+SpamAssasin/
+SpamAssasin.zip
+
+# Regenerable pipeline output
+predictions/
+
+# Experiment cache artifacts (rejected features — see PROJECT_STATUS.md)
+*.pkl
+*.npy
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Frontend
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Backend / env secrets
+.env
+.env.local
+.env.*.local
+
+# Postgres local volume (docker-compose)
+app/backend/pgdata/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
