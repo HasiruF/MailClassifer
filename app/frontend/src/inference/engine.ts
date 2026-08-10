@@ -42,6 +42,12 @@ let sessions: Partial<Record<ModelKey, ort.InferenceSession>> = {}
 let spamVocab: SpamVocab | null = null
 let categoryVocab: CategoryVocab | null = null
 let priorityVocab: PriorityVocab | null = null
+// Memoizes the in-flight/completed load — without this, calling loadModels()
+// twice (e.g. React 19 Strict Mode's dev-only double-invoke of useEffect on
+// mount) starts a second, concurrent ort.InferenceSession.create() for each
+// model, which the ONNX runtime doesn't tolerate. Every caller gets the same
+// promise instead of triggering duplicate work.
+let loadPromise: Promise<void> | null = null
 
 async function fetchJson<T>(path: string): Promise<T> {
   const res = await fetch(path)
@@ -49,25 +55,29 @@ async function fetchJson<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function loadModels() {
-  const [sessionEntries] = await Promise.all([
-    Promise.all(
-      (Object.keys(MODEL_PATHS) as ModelKey[]).map(async (key) => {
-        const session = await ort.InferenceSession.create(MODEL_PATHS[key])
-        return [key, session] as const
+export function loadModels(): Promise<void> {
+  if (loadPromise) return loadPromise
+  loadPromise = (async () => {
+    const [sessionEntries] = await Promise.all([
+      Promise.all(
+        (Object.keys(MODEL_PATHS) as ModelKey[]).map(async (key) => {
+          const session = await ort.InferenceSession.create(MODEL_PATHS[key])
+          return [key, session] as const
+        }),
+      ),
+      fetchJson<SpamVocab>('/models/spam_classifier.vocab.json').then((v) => {
+        spamVocab = v
       }),
-    ),
-    fetchJson<SpamVocab>('/models/spam_classifier.vocab.json').then((v) => {
-      spamVocab = v
-    }),
-    fetchJson<CategoryVocab>('/models/category_classifier.vocab.json').then((v) => {
-      categoryVocab = v
-    }),
-    fetchJson<PriorityVocab>('/models/priority_classifier.vocab.json').then((v) => {
-      priorityVocab = v
-    }),
-  ])
-  sessions = Object.fromEntries(sessionEntries)
+      fetchJson<CategoryVocab>('/models/category_classifier.vocab.json').then((v) => {
+        categoryVocab = v
+      }),
+      fetchJson<PriorityVocab>('/models/priority_classifier.vocab.json').then((v) => {
+        priorityVocab = v
+      }),
+    ])
+    sessions = Object.fromEntries(sessionEntries)
+  })()
+  return loadPromise
 }
 
 export function modelsLoaded(): boolean {
