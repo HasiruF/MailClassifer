@@ -24,9 +24,10 @@ import { vaderCompound } from './sentiment'
 // build headaches, and this app never sends user data anywhere regardless,
 // so fetching the *runtime engine* (not email content) from a CDN doesn't
 // weaken the privacy boundary. Version must match the installed
-// onnxruntime-web version exactly, or the WASM binary and JS wrapper can
-// disagree on the ABI.
-ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.19.0/dist/'
+// onnxruntime-web version exactly (package.json pins it unranged, with
+// this exact number, for the same reason) — a mismatch between the WASM
+// binary and the JS wrapper is an ABI break, not a graceful fallback.
+ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.27.0/dist/'
 
 const MODEL_PATHS = {
   spam: '/models/spam_classifier.onnx',
