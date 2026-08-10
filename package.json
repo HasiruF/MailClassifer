@@ -1,0 +1,18 @@
+{
+  "name": "email-classifier",
+  "private": true,
+  "description": "Root pipeline entry point — currently just the frontend; dev:be/docker:* etc. join this file once the backend exists.",
+  "scripts": {
+    "dev": "npm run dev:fe",
+    "build": "npm run build:fe",
+    "start": "npm run start:fe",
+    "test": "npm run test:fe",
+    "lint": "npm run lint:fe",
+
+    "dev:fe": "npm --prefix app/frontend run dev",
+    "build:fe": "npm --prefix app/frontend run build",
+    "start:fe": "npm run build:fe && npx serve app/frontend/out",
+    "test:fe": "npm --prefix app/frontend run test",
+    "lint:fe": "npm --prefix app/frontend run lint"
+  }
+}
