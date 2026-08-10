@@ -34,6 +34,32 @@ This design assumes that export tooling is reused as-is; the frontend TF-IDF
 port, feature extraction, and ONNX wiring will be rebuilt following the same
 approach, since the code (not the method) was deleted.
 
+### 1.1 Phasing
+
+The backend (§5.3's personalization service, §6's Postgres schema) is
+strictly additive — every layer that delivers the proposal's actual value
+(classify, prioritize, inbox, suggested actions, dashboard) runs entirely
+client-side already. Nothing in the backend is load-bearing for a working
+demo. So this is built in two phases:
+
+- **Phase 1 — frontend only.** Everything in §2's diagram except the
+  "3b. Personalization" subgraph and its backend/DB nodes. This includes
+  full correction logging (§5.4) — corrections always write to IndexedDB
+  first regardless of personalization, so that UX works in phase 1, it just
+  has nothing to sync to yet. Custom categories (§5.4, §6) are built now
+  too, but **disabled/grayed out** with a note that they need phase 2 to
+  actually classify anything into them — the data model and UI shell exist
+  from the start, so phase 2 doesn't require rework, just un-graying a
+  feature and pointing it at a real endpoint.
+- **Phase 2 — backend.** The personalization service (§5.3), its Postgres
+  schema (§6), and wiring the phase-1 UI's disabled affordances (sync
+  toggle, custom-category creation) to it.
+
+Everything else in this document (architecture, components, schema, privacy
+boundary, error handling, testing) describes the target end state across
+both phases; section text doesn't repeat "phase 1 / phase 2" per item
+except where the distinction actually changes behavior (see §5.4).
+
 ## 2. Architecture overview
 
 ```mermaid
@@ -173,6 +199,10 @@ Rebuilding the deleted-but-proven pieces:
   needed, since the raw classification results already live locally).
 - **Feedback logging** — correction UI (user overrides a label), stored
   locally always, synced to the backend only if personalization is enabled.
+- **Custom category creation** — UI and IndexedDB storage (`customCategories`)
+  built in phase 1; the "create" action is disabled/grayed with an inline
+  note ("enable personalization to let a custom category actually classify
+  emails") until phase 2 wires it to the backend's centroid/kNN retraining.
 
 ## 6. Storage & schema
 
