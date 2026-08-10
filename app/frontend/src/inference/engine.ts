@@ -42,11 +42,9 @@ let sessions: Partial<Record<ModelKey, ort.InferenceSession>> = {}
 let spamVocab: SpamVocab | null = null
 let categoryVocab: CategoryVocab | null = null
 let priorityVocab: PriorityVocab | null = null
-// Memoizes the in-flight/completed load — without this, calling loadModels()
-// twice (e.g. React 19 Strict Mode's dev-only double-invoke of useEffect on
-// mount) starts a second, concurrent ort.InferenceSession.create() for each
-// model, which the ONNX runtime doesn't tolerate. Every caller gets the same
-// promise instead of triggering duplicate work.
+// Memoizes the in-flight/completed load so repeated calls (e.g. React 19
+// Strict Mode's dev-only double-invoke of useEffect on mount) share one
+// result instead of re-running everything.
 let loadPromise: Promise<void> | null = null
 
 async function fetchJson<T>(path: string): Promise<T> {
@@ -58,13 +56,13 @@ async function fetchJson<T>(path: string): Promise<T> {
 export function loadModels(): Promise<void> {
   if (loadPromise) return loadPromise
   loadPromise = (async () => {
-    const [sessionEntries] = await Promise.all([
-      Promise.all(
-        (Object.keys(MODEL_PATHS) as ModelKey[]).map(async (key) => {
-          const session = await ort.InferenceSession.create(MODEL_PATHS[key])
-          return [key, session] as const
-        }),
-      ),
+    // Vocab JSON is plain HTTP — safe to fetch concurrently with everything
+    // else. ONNX sessions are NOT: onnxruntime-web's WASM backend only
+    // tolerates one InferenceSession.create() in flight at a time — racing
+    // multiple concurrently (e.g. via Promise.all/map, which is what this
+    // looked like before) throws "Session already started". So these are
+    // created one at a time, awaited in sequence, not in parallel.
+    const vocabPromise = Promise.all([
       fetchJson<SpamVocab>('/models/spam_classifier.vocab.json').then((v) => {
         spamVocab = v
       }),
@@ -75,7 +73,14 @@ export function loadModels(): Promise<void> {
         priorityVocab = v
       }),
     ])
-    sessions = Object.fromEntries(sessionEntries)
+
+    const newSessions: Partial<Record<ModelKey, ort.InferenceSession>> = {}
+    for (const key of Object.keys(MODEL_PATHS) as ModelKey[]) {
+      newSessions[key] = await ort.InferenceSession.create(MODEL_PATHS[key])
+    }
+    sessions = newSessions
+
+    await vocabPromise
   })()
   return loadPromise
 }
