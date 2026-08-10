@@ -48,3 +48,4 @@ app/backend/pgdata/
 Thumbs.db
 .vscode/
 .idea/
+app/frontend/.diag/

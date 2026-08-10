@@ -131,10 +131,13 @@ export async function classify(email: EmailInput): Promise<ClassificationResult>
   const compound = vaderCompound(cleanedText)
   const priorityVec = buildPriorityVector(email, cleanedText, categoryLabel, spamConf, compound, priorityVocab)
   const priorityFeeds = { features: new ort.Tensor('float32', priorityVec, [1, priorityVec.length]) }
-  const [priorityClfOut, priorityRegOut] = await Promise.all([
-    requireSession('priority').run(priorityFeeds),
-    requireSession('priorityRegressor').run(priorityFeeds),
-  ])
+  // Same constraint as loadModels(): onnxruntime-web's WASM backend only
+  // tolerates one session operation in flight at a time, whether that's
+  // create() or run() — these two .run() calls used to race via
+  // Promise.all, which is what actually threw "Session already started"
+  // (confirmed via a real headless-browser repro, not guessed).
+  const priorityClfOut = await requireSession('priority').run(priorityFeeds)
+  const priorityRegOut = await requireSession('priorityRegressor').run(priorityFeeds)
   const priorityBucket = (priorityClfOut.label.data as string[])[0] as PriorityBucket
   // skl2onnx names a bare regressor's sole output "variable" — confirmed
   // against the actual exported graph during the earlier attempt.
