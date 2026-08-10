@@ -133,7 +133,9 @@ Layer responsibilities, matching the proposal's own structure:
 | Training pipeline | Python | Already built (`scripts/`), out of scope here |
 | Backend | Python (FastAPI) | Matches proposal's stated primary language; shares tooling with training scripts if ever needed |
 | Frontend + inference | TypeScript | Mandatory — browser-only execution is the privacy requirement itself; strict typing catches silent numeric drift in feature-vector code, where a slip produces a wrong prediction, not a crash |
-| Frontend hosting | Vercel | Zero-config Vite/React deploys; no ML server to host since inference is 100% client-side |
+| Frontend framework | **Next.js (App Router), static export** (`output: 'export'`) | Proposal only mandates React, not a specific bundler. Next's file-based routing fits the now-multi-page scope (inbox / dashboard / settings / auth callback) better than hand-wired `react-router`. Static export specifically (not default SSR) turns "email content never touches a server" into a build-time guarantee — there's no server runtime for ML-touching code to accidentally run on — rather than something maintained purely by remembering `"use client"` on every component. |
+| UI components | shadcn/ui | Copy-in components (not a black-box dependency), built for exactly this kind of data-dense UI (lists, badges, dashboard cards) — good fit for the inbox/dashboard scope, which is the main net-new work here |
+| Frontend hosting | Vercel | Zero-config Next.js deploys; no ML server to host since inference is 100% client-side |
 | Backend + DB hosting | Render (Postgres add-on) | One platform for backend+DB, free tier, deploys from the existing `Dockerfile` |
 | Local dev | Docker Compose (Postgres + Adminer + backend) | Unchanged from before |
 | Gmail access | Google Cloud OAuth client, **Testing** publish status | Caps at 100 test users but skips Google's verification review — doesn't fit the course timeline otherwise |
