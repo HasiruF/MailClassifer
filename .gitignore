@@ -7,6 +7,12 @@ SpamAssasin.zip
 # Regenerable pipeline output
 predictions/
 
+# ONNX export output (regenerate via scripts/export_onnx.py — see
+# app/frontend/public/models/README.md)
+models/onnx/
+app/frontend/public/models/*.onnx
+app/frontend/public/models/*.vocab.json
+
 # Experiment cache artifacts (rejected features — see PROJECT_STATUS.md)
 *.pkl
 *.npy
@@ -25,6 +31,9 @@ dist/
 dist-ssr/
 .vite/
 *.local
+*.tsbuildinfo
+.next/
+app/frontend/out/
 
 # Backend / env secrets
 .env
