@@ -1,6 +1,6 @@
 # Email Classifier — Current Setup
 
-Last updated: 2026-07-20
+Last updated: 2026-08-10
 
 ## What this project is
 
@@ -67,11 +67,14 @@ trains on. Retrained + re-ran eval from the new folder locations afterward to
 confirm nothing broke (same 73.6% CV result).
 
 **`app/`** — the actual application (separate from the `scripts/` training
-pipeline above): Vite+React+TS frontend running inference client-side via
-`onnxruntime-web`, FastAPI+Postgres backend for the opt-in personalization
-feature only (never sees raw email — see `app/README.md`). Scaffolded, not
-yet functional — model export (`.joblib` → ONNX) is the next real blocker.
-See `app/README.md` for current state and setup.
+pipeline above), now a working Next.js (App Router, static export) frontend
+running all four models client-side via `onnxruntime-web`. See the
+"Application layer (`app/`)" section below for full detail — the one-line
+version: Phase 1 (frontend-only classification engine) is built, tested, and
+committed; a full inbox UI sits on top of it, built and working but not yet
+committed; Phase 2 (FastAPI+Postgres backend, opt-in personalization) is not
+started. No `app/README.md` exists — design/plan docs live under
+`docs/superpowers/`.
 
 ## Datasets
 
@@ -501,6 +504,113 @@ helps Other too" hypothesis (~22-24% of "Other" is genuinely spam-shaped —
 see the Other composition table above) — `spam_probability` as an added
 numeric column, not yet wired in.
 
+## Application layer (`app/`)
+
+Design doc: `docs/superpowers/specs/2026-08-10-smart-email-app-design.md`.
+Implementation plan (Phase 1): `docs/superpowers/plans/2026-08-10-core-classification-pipeline.md`.
+An earlier Vite+React attempt was deleted and restarted deliberately on
+Next.js — see the design doc §1 for why (that attempt did prove `skl2onnx`
+can't convert `char_wb` TF-IDF, which is why the TF-IDF math below is
+hand-ported instead of trusted to ONNX conversion).
+
+### Phase 1 — classification engine (`app/frontend/`) — done, committed
+
+Next.js 16 (App Router, TypeScript, `output: 'export'` so "email content
+never touches a server" is a build-time guarantee), shadcn/ui, Vitest.
+Built task-by-task per the plan, all committed (see `git log` — "Scaffold
+Next.js app" through "Fix real 'Session already started' cause"):
+
+- `scripts/export_onnx.py` (repo root) exports each `.joblib` model as a
+  **headless** ONNX graph (dense float vector in, not raw text) plus a
+  `*.vocab.json` sidecar (vocabulary, idf, scaler mean/scale, class order).
+  Output is gitignored (`models/onnx/`, `app/frontend/public/models/*.onnx`,
+  `*.vocab.json`) — regenerate via `python scripts/export_onnx.py --models
+  models --out models/onnx` then copy into `app/frontend/public/models/`.
+- `src/inference/tfidf.ts` — hand-ported word + `char_wb` TF-IDF, verified
+  **bit-exact (0.000000 diff)** against fixtures dumped from the real fitted
+  sklearn vectorizers (`scripts/dump_tfidf_fixtures.py` →
+  `src/inference/__fixtures__/tfidf_fixtures.json`, committed as a test
+  fixture).
+- `src/inference/features.ts` — header/keyword feature extraction (ported
+  from `scripts/shared/header_features.py` /
+  `priority_keyword_features.py`) plus the dense vector builders
+  (`buildSpamVector`/`buildCategoryVector`/`buildPriorityVector`) that
+  concatenate TF-IDF + header + stylistic + keyword features in the exact
+  order the exported ONNX graphs expect.
+- `src/inference/stylistic.ts` — tone/register features, ported from
+  `scripts/shared/stylistic_features.py`.
+- `src/inference/sentiment.ts` — VADER via the `vader-sentiment` npm
+  package, cross-checked against Python's `vaderSentiment` to 4 decimal
+  places (not exhaustively parity-tested the way TF-IDF was — see design
+  doc §9).
+- `src/inference/engine.ts` — `loadModels()`/`modelsLoaded()`/`classify()`.
+  Loads all 4 ONNX sessions (spam, category, priority classifier +
+  regressor) and their vocab JSON from `/models/`, runs spam and category
+  independently then priority last (it depends on spam's confidence,
+  category's label, and VADER sentiment). Same spam→priority suppression
+  rule as `classify_email.py` (spam floors priority to 0.1).
+  **Two real bugs found and fixed post-plan** (fixed via three follow-up
+  commits, not anticipated in the plan): onnxruntime-web's WASM backend only
+  tolerates one `InferenceSession` operation in flight at a time —
+  `loadModels()` now creates sessions sequentially instead of via
+  `Promise.all`, `classify()` now awaits the two priority-model `.run()`
+  calls sequentially instead of racing them, and `loadModels()` is
+  idempotent (memoized promise) so React 19 Strict Mode's dev-only
+  double-invoke doesn't reload everything twice.
+- `src/app/page.tsx` — the plan's minimal demo page: one hand-entered email,
+  Classify button, badges for spam/category/priority. Still present at `/`.
+- **Not done from the design doc's target state (expected — this was Phase
+  1 only):** no Gmail ingestion, no IndexedDB persistence, no
+  personalization backend, no correction logging, no dashboard.
+
+### Inbox UI (`app/frontend/src/app/inbox/`) — built and working, **not yet committed**
+
+Net-new scope beyond the Phase 1 plan (which only specified the single-email
+demo page above) — `git status` shows this whole directory, plus
+`src/data/sample-emails.ts` and a root-level `inbox-design.html` mockup, as
+untracked. Not covered by any written design/plan doc; built directly.
+
+- `src/data/sample-emails.ts` — 8 hand-authored emails (explicit stand-in
+  for real Gmail ingestion, which is Phase 2 scope) covering one of each
+  interesting case: urgent approval request, work anomaly, casual lunch
+  plan, routine IT notice, obvious marketing spam, work deliverable,
+  personal birthday note, all-staff facilities notice. Every row is run
+  through the real `classify()` engine at runtime — nothing is pre-labeled.
+- `inbox-context.tsx` — `InboxProvider`/`useInbox()`, loads models once and
+  classifies all 8 sample emails **sequentially** (same WASM
+  one-at-a-time constraint as `engine.ts`), exposes `rows` (email + result),
+  category filter, and an "only high priority" toggle.
+- `sidebar.tsx` — nav by category (All/Work/Personal/Other, live counts) and
+  a "High Priority" view; shows model-load status (`MODEL LOADING…` /
+  `MODEL READY · ON-DEVICE` / `MODEL ERROR`).
+- `page.tsx` (inbox list) — subject/sender/preview rows with a priority dot
+  (filled = high, hollow ring = low), unread indicator, low-priority rows
+  dimmed via opacity, category+priority+score badges per row, spam tag when
+  applicable.
+- `[id]/page.tsx` + `email-detail.tsx` — full email view with a "MODEL
+  OUTPUT" breakdown: category confidence bars (all classes, sorted),
+  priority score bar, spam-confidence bar, spam-suppression note when
+  applicable. `generateStaticParams()` pre-renders one route per sample
+  email (consistent with the static-export constraint).
+- `tokens.ts` — a small hand-picked design-token palette (editorial/mono
+  aesthetic: `INK`/`MUTED`/`FAINT`/`HIGH`/`MEDIUM`/`SPAM`/border/background
+  colors) shared across the inbox list, sidebar, and detail view.
+- **Known gap:** entirely in-memory/session-scoped — no IndexedDB, so
+  nothing persists across a reload and there's no path yet from this UI to
+  real inbox data. This is exactly Phase 2's `LocalStore`/Gmail-ingestion
+  scope per the design doc, just not wired up.
+
+### Not started
+
+- **Phase 2 (backend)** — no `app/backend/` exists yet (`.gitignore` already
+  has a placeholder entry for `app/backend/pgdata/`, but there's no FastAPI
+  project, no Postgres schema, no Gmail OAuth flow). Personalization,
+  correction sync, and custom categories are all still just design-doc
+  sections (§5.1, §5.3, §5.4, §6), not code.
+- Committing the inbox UI, and reconciling it with a written spec/plan
+  (it was built ahead of any doc for it — worth writing one retroactively or
+  before extending it further, per this project's own process).
+
 ## Known gaps / not yet done
 
 - `predictions/` is now empty — the stale v1 category predictions and the
@@ -589,13 +699,15 @@ numeric column, not yet wired in.
      at 55% coverage, conf≥0.50 gets 75.3% at 85.9% coverage (both numbers
      predate 3f and were measured on same-corpus CV, so treat as stale).
      Left here as a documented fallback if it's ever revisited.
-2. **JS/browser export** — not started. The trained sklearn pipeline
-   (vocabulary + IDF weights + LR coefficients) needs porting to a small
-   hand-written JS implementation (TF-IDF vectorization + dot product +
-   softmax) so classification can run entirely client-side per the
-   proposal's privacy requirement. No ML runtime dependency needed for the
-   current linear model — this gets harder if a heavier model is ever
-   adopted.
+2. **JS/browser export — done.** See "Application layer (`app/`)" above.
+   Landed differently than originally sketched here: rather than a pure
+   hand-rolled TF-IDF+dot-product+softmax port, the models export to
+   headless ONNX graphs (`scripts/export_onnx.py`) run via
+   `onnxruntime-web`, with only the TF-IDF vectorization itself (the piece
+   `skl2onnx` can't convert exactly) hand-ported to TypeScript
+   (`app/frontend/src/inference/tfidf.ts`), verified bit-exact against the
+   real fitted sklearn vectorizers. Fully client-side, no server round-trip
+   for classification.
 3. **Sentiment module — done.** Wired VADER (`vaderSentiment` pkg) into
    `_priority()` in `classify_email.py`. It's a lexicon+rule scorer, not a
    trained model, so it doesn't hit the client-side/privacy constraint that
