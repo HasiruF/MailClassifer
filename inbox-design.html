@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Inbox — design concept</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #F6F7F4;
+    --surface: #FFFFFF;
+    --ink: #191C1F;
+    --ink-muted: #676F76;
+    --ink-faint: #9AA0A0;
+    --line: #E3E6E2;
+    --line-strong: #D3D7D2;
+
+    --priority: #C1602A;
+    --priority-medium: #E0A47C;
+    --priority-low: #E3E6E2;
+
+    --cat-work: #46577A;
+    --cat-work-bg: #EDF0F5;
+    --cat-personal: #8C5B79;
+    --cat-personal-bg: #F5EEF2;
+    --cat-other: #8F8779;
+    --cat-other-bg: #F2F0EB;
+
+    --radius: 10px;
+    --font-display: "Space Grotesk", sans-serif;
+    --font-body: "IBM Plex Sans", sans-serif;
+    --font-mono: "IBM Plex Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 80px;
+  }
+
+  .app {
+    width: 100%;
+    max-width: 760px;
+  }
+
+  /* ── Top bar ─────────────────────────────────────────── */
+
+  .topbar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 4px 4px 20px;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .brand .mark {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: 20px;
+    letter-spacing: -0.01em;
+  }
+
+  .brand .mark span {
+    color: var(--priority);
+  }
+
+  .stats {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--ink-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .stats strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .stats .dot-sep {
+    color: var(--line-strong);
+  }
+
+  .stats .needs-attention {
+    color: var(--priority);
+    font-weight: 600;
+  }
+
+  .privacy-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--ink-muted);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 5px 10px 5px 8px;
+  }
+
+  .privacy-pill svg {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+  }
+
+  .topbar-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  /* ── Filter tabs ─────────────────────────────────────── */
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    padding: 0 4px 16px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 2px;
+    overflow-x: auto;
+  }
+
+  .tab {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    background: transparent;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 7px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+
+  .tab:hover {
+    background: var(--surface);
+    color: var(--ink);
+  }
+
+  .tab.active {
+    background: var(--ink);
+    color: var(--bg);
+  }
+
+  .tab:focus-visible {
+    outline: 2px solid var(--priority);
+    outline-offset: 2px;
+  }
+
+  .tab .count {
+    opacity: 0.6;
+    margin-left: 2px;
+  }
+
+  /* ── Row list ────────────────────────────────────────── */
+
+  .list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  .row {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    position: relative;
+    opacity: 0;
+    animation: rise 0.5s ease forwards;
+  }
+
+  .row:last-child { border-bottom: none; }
+
+  .row:hover { background: #FBFBFA; }
+  .row:hover .bar { filter: brightness(1.08); }
+
+  .row:focus-visible {
+    outline: 2px solid var(--priority);
+    outline-offset: -2px;
+  }
+
+  .bar {
+    width: 4px;
+    flex-shrink: 0;
+    background: var(--p-color, var(--line));
+    opacity: var(--p-opacity, 1);
+    transition: filter 0.15s ease;
+  }
+
+  .row[data-priority="high"]   { --p-color: var(--priority); --p-opacity: 1; }
+  .row[data-priority="medium"] { --p-color: var(--priority-medium); --p-opacity: 1; }
+  .row[data-priority="low"]    { --p-color: var(--line-strong); --p-opacity: 1; }
+
+  .row-content {
+    flex: 1;
+    min-width: 0;
+    padding: 14px 18px 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .row-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .sender {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .row.is-read .sender { font-weight: 500; color: var(--ink-muted); }
+
+  .unread-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--priority);
+    flex-shrink: 0;
+  }
+
+  .row.is-read .unread-dot { display: none; }
+
+  .time {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .subject {
+    font-size: 14px;
+    color: var(--ink);
+    line-height: 1.4;
+  }
+
+  .row.is-read .subject { color: var(--ink-muted); font-weight: 400; }
+
+  .snippet {
+    font-size: 13px;
+    color: var(--ink-faint);
+    line-height: 1.4;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .row-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+  }
+
+  .cat-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 3px 8px 3px 6px;
+    border-radius: 5px;
+    font-weight: 500;
+  }
+
+  .cat-pill::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--dot);
+  }
+
+  .cat-pill[data-cat="work"]     { background: var(--cat-work-bg);     color: var(--cat-work);     --dot: var(--cat-work); }
+  .cat-pill[data-cat="personal"] { background: var(--cat-personal-bg); color: var(--cat-personal); --dot: var(--cat-personal); }
+  .cat-pill[data-cat="other"]    { background: var(--cat-other-bg);    color: var(--cat-other);    --dot: var(--cat-other); }
+
+  .confidence {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+  }
+
+  .priority-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    margin-left: auto;
+  }
+
+  .row[data-priority="high"] .priority-label   { color: var(--priority); }
+  .row[data-priority="medium"] .priority-label { color: #B87A4A; }
+  .row[data-priority="low"] .priority-label    { color: var(--ink-faint); }
+
+  /* ── Footer note ─────────────────────────────────────── */
+
+  .footnote {
+    margin-top: 22px;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    color: var(--ink-faint);
+    line-height: 1.6;
+    text-align: center;
+  }
+
+  /* ── Motion ──────────────────────────────────────────── */
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .row:nth-child(1) { animation-delay: 0.02s; }
+  .row:nth-child(2) { animation-delay: 0.06s; }
+  .row:nth-child(3) { animation-delay: 0.10s; }
+  .row:nth-child(4) { animation-delay: 0.14s; }
+  .row:nth-child(5) { animation-delay: 0.18s; }
+  .row:nth-child(6) { animation-delay: 0.22s; }
+  .row:nth-child(7) { animation-delay: 0.26s; }
+  .row:nth-child(8) { animation-delay: 0.30s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .row { animation: none; opacity: 1; }
+    * { transition: none !important; }
+  }
+
+  /* ── Responsive ──────────────────────────────────────── */
+
+  @media (max-width: 560px) {
+    body { padding: 24px 12px 60px; }
+    .topbar { padding-bottom: 14px; }
+    .privacy-pill span { display: none; }
+    .snippet { display: none; }
+    .row-content { padding: 12px 14px; }
+    .priority-label { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <div class="topbar">
+    <div class="topbar-row">
+      <div class="brand">
+        <span class="mark">inbox<span>.</span></span>
+        <span class="stats">
+          <strong>8</strong> in view <span class="dot-sep">·</span>
+          <span class="needs-attention">2 need attention</span>
+        </span>
+      </div>
+      <div class="privacy-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6z"/></svg>
+        <span>classified on-device</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist" aria-label="Filter by category">
+    <button class="tab active" role="tab" aria-selected="true">All <span class="count">8</span></button>
+    <button class="tab" role="tab" aria-selected="false">Work <span class="count">3</span></button>
+    <button class="tab" role="tab" aria-selected="false">Personal <span class="count">3</span></button>
+    <button class="tab" role="tab" aria-selected="false">Other <span class="count">2</span></button>
+  </div>
+
+  <div class="list">
+
+    <div class="row" data-priority="high" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender"><span class="unread-dot"></span>Sarah Chen</span>
+          <span class="time">8m</span>
+        </div>
+        <div class="subject">URGENT: Server outage — customer-facing, need approval now</div>
+        <div class="snippet">Prod is down for EU customers, need your go-ahead to fail over before it hits the US region too.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="work">Work</span>
+          <span class="confidence">94% conf</span>
+          <span class="priority-label">High · 0.91</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" data-priority="high" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender"><span class="unread-dot"></span>Jordan · Landlord</span>
+          <span class="time">40m</span>
+        </div>
+        <div class="subject">Water shut-off notice — action needed today</div>
+        <div class="snippet">Building maintenance starting at 2pm, please move anything from under the sink before then.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="personal">Personal</span>
+          <span class="confidence">88% conf</span>
+          <span class="priority-label">High · 0.86</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" data-priority="medium" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender"><span class="unread-dot"></span>Legal · CEO Office</span>
+          <span class="time">2h</span>
+        </div>
+        <div class="subject">URGENT: Approval needed by EOD</div>
+        <div class="snippet">Hi, please sign off on the attached contract before end of day. Legal is waiting.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="work">Work</span>
+          <span class="confidence">87% conf</span>
+          <span class="priority-label">Medium · 0.53</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row is-read" data-priority="medium" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender">Mom</span>
+          <span class="time">5h</span>
+        </div>
+        <div class="subject">Dinner Sunday?</div>
+        <div class="snippet">Can you come by Sunday, dad's asking about you. Bring the kids if you're free.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="personal">Personal</span>
+          <span class="confidence">91% conf</span>
+          <span class="priority-label">Medium · 0.47</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row is-read" data-priority="medium" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender">Community Board</span>
+          <span class="time">1d</span>
+        </div>
+        <div class="subject">Neighborhood meeting rescheduled</div>
+        <div class="snippet">The HOA meeting has moved to next Tuesday at 7pm, same location as usual.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="other">Other</span>
+          <span class="confidence">79% conf</span>
+          <span class="priority-label">Medium · 0.41</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" data-priority="low" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender"><span class="unread-dot"></span>Alex Rivera</span>
+          <span class="time">3h</span>
+        </div>
+        <div class="subject">Lunch on Friday?</div>
+        <div class="snippet">Hey, are you free for lunch this Friday? Let me know.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="personal">Personal</span>
+          <span class="confidence">89% conf</span>
+          <span class="priority-label">Low · 0.28</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row is-read" data-priority="low" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender">HR Team</span>
+          <span class="time">6h</span>
+        </div>
+        <div class="subject">Benefits enrollment reminder</div>
+        <div class="snippet">Open enrollment closes end of month, no action needed if you're happy with your current plan.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="work">Work</span>
+          <span class="confidence">95% conf</span>
+          <span class="priority-label">Low · 0.10</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="row is-read" data-priority="low" tabindex="0">
+      <div class="bar"></div>
+      <div class="row-content">
+        <div class="row-top">
+          <span class="sender">Energy Market Digest</span>
+          <span class="time">1d</span>
+        </div>
+        <div class="subject">Weekly newsletter — Energy market digest</div>
+        <div class="snippet">This is your weekly roundup. Unsubscribe at any time. No action needed.</div>
+        <div class="row-meta">
+          <span class="cat-pill" data-cat="other">Other</span>
+          <span class="confidence">100% conf</span>
+          <span class="priority-label">Low · 0.10</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="footnote">Priority reads as intensity, not alarms — the left edge is the whole signal.<br>Every classification above ran in this browser. Nothing here was sent anywhere.</p>
+
+</div>
+
+</body>
+</html>
