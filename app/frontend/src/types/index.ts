@@ -18,3 +18,13 @@ export interface ClassificationResult {
   category: { label: CategoryLabel | string; confidences: Record<string, number> }
   priority: { score: number; bucket: PriorityBucket; note?: string }
 }
+
+// Display shape the inbox UI renders — shared by the hand-authored sample
+// data (src/data/sample-emails.ts) and real messages fetched from Gmail
+// (src/lib/gmail-fetch.ts), so the inbox list/detail views don't care which
+// source produced a given row.
+export interface InboxEmail extends EmailInput {
+  fromName: string
+  receivedAt: string
+  unread: boolean
+}

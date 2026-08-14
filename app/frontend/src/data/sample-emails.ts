@@ -1,14 +1,9 @@
-import type { EmailInput } from '@/types'
+import type { InboxEmail } from '@/types'
 
-// Stand-in for real Gmail ingestion (deferred to Phase 2 — see
-// docs/superpowers/specs/2026-08-10-smart-email-app-design.md). Each of
-// these gets run through the real classify() engine at runtime; nothing
-// here is a pre-baked label.
-export interface SampleEmail extends EmailInput {
-  fromName: string
-  receivedAt: string
-  unread: boolean
-}
+// Fallback shown before a real Gmail account is connected (see
+// src/lib/gmail-fetch.ts). Each of these gets run through the real
+// classify() engine at runtime; nothing here is a pre-baked label.
+export type SampleEmail = InboxEmail
 
 export const SAMPLE_EMAILS: SampleEmail[] = [
   {

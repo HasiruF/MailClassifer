@@ -1,8 +1,7 @@
 'use client'
 
-import Link from 'next/link'
-import { useInbox } from '../inbox-context'
-import { DETAIL_BG, DETAIL_BORDER, DETAIL_FAINT, DETAIL_MUTED, HIGH, INK, MEDIUM } from '../tokens'
+import { useInbox } from './inbox-context'
+import { DETAIL_BG, DETAIL_BORDER, DETAIL_FAINT, DETAIL_MUTED, HIGH, INK, MEDIUM } from './tokens'
 
 function Bar({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -24,15 +23,15 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
 }
 
 export function EmailDetail({ id }: { id: string }) {
-  const { rows } = useInbox()
+  const { rows, selectEmail } = useInbox()
   const row = rows.find((r) => r.id === id)
 
   if (!row) {
     return (
       <main className="p-6" style={{ color: INK }}>
-        <Link href="/inbox" className="font-mono text-xs tracking-wide" style={{ color: DETAIL_MUTED }}>
+        <button onClick={() => selectEmail(null)} className="font-mono text-xs tracking-wide" style={{ color: DETAIL_MUTED }}>
           ← INBOX
-        </Link>
+        </button>
         <p className="mt-4 font-mono text-sm">Unknown message.</p>
       </main>
     )
@@ -44,9 +43,9 @@ export function EmailDetail({ id }: { id: string }) {
   return (
     <main className="min-h-screen" style={{ background: DETAIL_BG, color: INK }}>
       <div className="mx-auto max-w-2xl px-6 py-6">
-        <Link href="/inbox" className="font-mono text-xs tracking-wide" style={{ color: DETAIL_MUTED }}>
+        <button onClick={() => selectEmail(null)} className="font-mono text-xs tracking-wide" style={{ color: DETAIL_MUTED }}>
           ← INBOX
-        </Link>
+        </button>
 
         <h1 className="mt-4 text-xl font-medium" style={{ color: INK }}>
           {row.subject}
