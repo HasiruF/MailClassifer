@@ -1,6 +1,6 @@
 # Email Classifier — Current Setup
 
-Last updated: 2026-08-10
+Last updated: 2026-08-14
 
 ## What this project is
 
@@ -68,12 +68,14 @@ confirm nothing broke (same 73.6% CV result).
 
 **`app/`** — the actual application (separate from the `scripts/` training
 pipeline above), now a working Next.js (App Router, static export) frontend
-running all four models client-side via `onnxruntime-web`. See the
-"Application layer (`app/`)" section below for full detail — the one-line
-version: Phase 1 (frontend-only classification engine) is built, tested, and
-committed; a full inbox UI sits on top of it, built and working but not yet
-committed; Phase 2 (FastAPI+Postgres backend, opt-in personalization) is not
-started. No `app/README.md` exists — design/plan docs live under
+running all four models client-side via `onnxruntime-web`, connected to a
+real Gmail inbox via client-side OAuth. See the "Application layer (`app/`)"
+section below for full detail — the one-line version: Phase 1 (frontend-only
+classification engine) is built, tested, and committed; a full inbox UI sits
+on top of it, committed; live Gmail fetch+classify sits on top of *that*,
+working but not yet committed; Phase 2 (FastAPI+Postgres backend, opt-in
+personalization, plus a minimal Gmail token-holder for persistent login) is
+not started. No `app/README.md` exists — design/plan docs live under
 `docs/superpowers/`.
 
 ## Datasets
@@ -563,53 +565,122 @@ Next.js app" through "Fix real 'Session already started' cause"):
   1 only):** no Gmail ingestion, no IndexedDB persistence, no
   personalization backend, no correction logging, no dashboard.
 
-### Inbox UI (`app/frontend/src/app/inbox/`) — built and working, **not yet committed**
+### Inbox UI (`app/frontend/src/app/inbox/`) — built, working, **committed**
 
 Net-new scope beyond the Phase 1 plan (which only specified the single-email
-demo page above) — `git status` shows this whole directory, plus
-`src/data/sample-emails.ts` and a root-level `inbox-design.html` mockup, as
-untracked. Not covered by any written design/plan doc; built directly.
+demo page above). Not covered by any written design/plan doc; built
+directly. Committed 2026-08-14 (`Add inbox UI (list/detail/sidebar) over the
+classification engine`).
 
-- `src/data/sample-emails.ts` — 8 hand-authored emails (explicit stand-in
-  for real Gmail ingestion, which is Phase 2 scope) covering one of each
-  interesting case: urgent approval request, work anomaly, casual lunch
-  plan, routine IT notice, obvious marketing spam, work deliverable,
-  personal birthday note, all-staff facilities notice. Every row is run
-  through the real `classify()` engine at runtime — nothing is pre-labeled.
+- `src/data/sample-emails.ts` — 8 hand-authored emails, fallback view shown
+  before a real Gmail account is connected (see Gmail integration below).
+  Every row is run through the real `classify()` engine at runtime —
+  nothing is pre-labeled.
 - `inbox-context.tsx` — `InboxProvider`/`useInbox()`, loads models once and
-  classifies all 8 sample emails **sequentially** (same WASM
-  one-at-a-time constraint as `engine.ts`), exposes `rows` (email + result),
-  category filter, and an "only high priority" toggle.
-- `sidebar.tsx` — nav by category (All/Work/Personal/Other, live counts) and
-  a "High Priority" view; shows model-load status (`MODEL LOADING…` /
-  `MODEL READY · ON-DEVICE` / `MODEL ERROR`).
-- `page.tsx` (inbox list) — subject/sender/preview rows with a priority dot
-  (filled = high, hollow ring = low), unread indicator, low-priority rows
-  dimmed via opacity, category+priority+score badges per row, spam tag when
-  applicable.
-- `[id]/page.tsx` + `email-detail.tsx` — full email view with a "MODEL
-  OUTPUT" breakdown: category confidence bars (all classes, sorted),
-  priority score bar, spam-confidence bar, spam-suppression note when
-  applicable. `generateStaticParams()` pre-renders one route per sample
-  email (consistent with the static-export constraint).
+  classifies rows **sequentially** (same WASM one-at-a-time constraint as
+  `engine.ts`), exposes `rows` (email + result), category filter, "only
+  high priority" toggle, and (as of the Gmail work below) Gmail connection
+  state and a client-side `selectedId` for the detail view.
+- `sidebar.tsx` — nav by category (All/Work/Personal/Other, live counts), a
+  "High Priority" view, model-load status, and Gmail connect/refresh
+  controls (see below).
+- `inbox-list.tsx` — subject/sender/preview rows with a priority dot (filled
+  = high, hollow ring = low), unread indicator, low-priority rows dimmed via
+  opacity, category+priority+score badges per row, spam tag when
+  applicable. (Split out of `page.tsx` on 2026-08-14 — see routing fix
+  below.)
+- `email-detail.tsx` — full email view: category confidence bars (all
+  classes, sorted), priority score bar, spam-confidence bar,
+  spam-suppression note when applicable.
+- `page.tsx` — thin switcher: renders `EmailDetail` if an email is selected,
+  `InboxList` otherwise. No longer a route-driven page (see below).
 - `tokens.ts` — a small hand-picked design-token palette (editorial/mono
   aesthetic: `INK`/`MUTED`/`FAINT`/`HIGH`/`MEDIUM`/`SPAM`/border/background
   colors) shared across the inbox list, sidebar, and detail view.
-- **Known gap:** entirely in-memory/session-scoped — no IndexedDB, so
-  nothing persists across a reload and there's no path yet from this UI to
-  real inbox data. This is exactly Phase 2's `LocalStore`/Gmail-ingestion
-  scope per the design doc, just not wired up.
+
+### Gmail integration (`app/frontend/src/lib/gmail-auth.ts`, `gmail-fetch.ts`) — built, working, **uncommitted**
+
+Built 2026-08-14, same session as a Google Cloud Console walkthrough (OAuth
+consent screen in **Testing** publish status, `gmail.readonly` scope, one
+Web application OAuth client). Not covered by any design/plan doc yet.
+**Deviates from the design doc's own assumption** (§10 open question: "is
+the backend involved at all") — turns out no: the read-only fetch+classify
+path needed zero backend involvement, resolving that open question in favor
+of "not involved."
+
+- `gmail-auth.ts` — Google Identity Services (GIS) token-client flow
+  (`initTokenClient`, popup-based). No backend, no client secret — this flow
+  structurally never issues a refresh token, only a short-lived (~1hr)
+  access token. `NEXT_PUBLIC_GOOGLE_CLIENT_ID` lives in
+  `app/frontend/.env.local` (gitignored).
+- `gmail-fetch.ts` — fetches the 40 most recent inbox messages directly from
+  the browser (`gmail.googleapis.com`, `Authorization: Bearer` header, no
+  backend proxy), parses the MIME payload (prefers `text/plain`, falls back
+  to `text/html` with tags stripped), maps into `InboxEmail`.
+  **Bug found and fixed:** initially fetched all messages via one
+  `Promise.all` — worked at 20 messages, threw `429 "Too many concurrent
+  requests for user"` at 40. This is a *separate*, undocumented per-user
+  concurrent-in-flight-requests cap, distinct from the (documented)
+  250-quota-units/sec limit. Fixed with a small worker-pool
+  (`mapWithConcurrency`, limit 8) instead of guessing a higher throttle.
+- Wired into `inbox-context.tsx`: `connectGmail()` (popup → fetch → classify
+  → replace sample rows with the real inbox) and `refreshInbox()` (re-fetch
+  using the already-granted token, no popup).
+- **Routing fix:** the original inbox detail view was `/inbox/[id]`, a
+  Next.js dynamic route. Under `output: 'export'`, every dynamic route's
+  params must be known at *build* time via `generateStaticParams()` — fine
+  for the 8 fixed sample-email IDs, structurally impossible for Gmail
+  message IDs, which don't exist until a user fetches at *runtime*. Hit as
+  `Page "/inbox/[id]/page" is missing param... required with "output:
+  export"`. Fixed by deleting the `[id]/` route entirely and moving the
+  detail view to client-side state (`selectedId` in `InboxProvider`) — no
+  URL for an individual message anymore (trade-off: no deep-linking/back
+  button between list and detail), but the static-export conflict is gone
+  for good rather than worked around.
+- **Persistence:** the access token is cached in `sessionStorage` (survives
+  a page reload within its ~1hr life; cleared on tab close) so reconnecting
+  isn't required on every reload. Deliberately **not** upgraded to a
+  refresh token or `localStorage` — reasoned through in session: no
+  client-side storage location is actually safe against XSS for a
+  long-lived credential (a hardcoded/derived key is readable straight out
+  of the shipped bundle; a non-extractable Web Crypto key blocks key
+  *export* but not same-origin *use*, so injected same-origin JS can still
+  call decrypt). Real persistent login needs a backend holding the refresh
+  token — logged as Phase 2 guidance directly below.
+- `app/frontend/package.json`'s `dev` script now pins `next dev -p 3010` to
+  match the origin/redirect URI registered on the Google OAuth client —
+  don't run this app on a different port without also updating the OAuth
+  client's registered origins in Google Cloud Console.
+- **Uncommitted right now:** `gmail-auth.ts`, `gmail-fetch.ts`,
+  `inbox-list.tsx`, `email-detail.tsx` (new files), plus modifications to
+  `inbox-context.tsx`, `sidebar.tsx`, `page.tsx`, `types/index.ts`,
+  `sample-emails.ts`, `package.json`, and the deletion of `inbox/[id]/`.
+
+**Phase 2 backend guidance (decided, not yet built):** when `app/backend/`
+gets built, its Gmail-auth piece should be a **minimal token-holder only**
+— server-side refresh token (e.g. HttpOnly-cookie-backed session), mints
+short-lived access tokens on request. The browser still calls the Gmail API
+directly and classifies client-side, exactly as now, so subject/body still
+never touch the backend — this keeps the design doc's §7 privacy boundary
+("raw subject/body never leaves the browser") intact, since a refresh token
+is a credential, not email content. Keep this separate from the
+personalization/corrections backend work (§5.3) — different concern, same
+Phase 2 backend. Do not default to storing a refresh token client-side.
 
 ### Not started
 
 - **Phase 2 (backend)** — no `app/backend/` exists yet (`.gitignore` already
   has a placeholder entry for `app/backend/pgdata/`, but there's no FastAPI
-  project, no Postgres schema, no Gmail OAuth flow). Personalization,
-  correction sync, and custom categories are all still just design-doc
-  sections (§5.1, §5.3, §5.4, §6), not code.
-- Committing the inbox UI, and reconciling it with a written spec/plan
-  (it was built ahead of any doc for it — worth writing one retroactively or
-  before extending it further, per this project's own process).
+  project, no Postgres schema). Personalization, correction sync, custom
+  categories, and the Gmail-auth token-holder above are all still just
+  design-doc sections or the guidance logged above — not code.
+- Committing the Gmail integration work, and reconciling both it and the
+  inbox UI with a written spec/plan (both were built ahead of any doc for
+  them — worth writing one retroactively, or before extending either
+  further, per this project's own process).
+- IndexedDB persistence for fetched/classified emails — currently
+  session-scoped only (a reload re-fetches from Gmail rather than reading
+  a local cache); this is the design doc's `LocalStore`, still unbuilt.
 
 ## Known gaps / not yet done
 
