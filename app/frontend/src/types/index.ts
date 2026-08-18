@@ -26,5 +26,10 @@ export interface ClassificationResult {
 export interface InboxEmail extends EmailInput {
   fromName: string
   receivedAt: string
+  receivedAtMs: number
   unread: boolean
+  // 'gmail' rows can deep-link back to the real message (id is a real
+  // Gmail message id); 'sample' rows can't — see EmailDetail's
+  // "Open in Gmail" link.
+  source: 'sample' | 'gmail'
 }

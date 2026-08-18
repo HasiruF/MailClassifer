@@ -5,6 +5,10 @@ import type { InboxEmail } from '@/types'
 // classify() engine at runtime; nothing here is a pre-baked label.
 export type SampleEmail = InboxEmail
 
+const NOW = Date.now()
+const HOUR = 3_600_000
+const DAY = 86_400_000
+
 export const SAMPLE_EMAILS: SampleEmail[] = [
   {
     id: 'e1',
@@ -14,7 +18,9 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     subject: 'URGENT: Approval needed by EOD',
     body: 'Hi, please sign off on the attached contract before end of day. Legal is waiting.',
     receivedAt: '9:12 AM',
+    receivedAtMs: NOW - 3 * HOUR,
     unread: true,
+    source: 'sample',
   },
   {
     id: 'e2',
@@ -24,7 +30,9 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     subject: 'Q3 pipeline numbers look off',
     body: 'Can you take a look at the Q3 gas pipeline throughput figures before the call tomorrow? Something in the Henry Hub column does not reconcile with last month.',
     receivedAt: '8:47 AM',
+    receivedAtMs: NOW - 3.5 * HOUR,
     unread: true,
+    source: 'sample',
   },
   {
     id: 'e3',
@@ -34,7 +42,9 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     subject: 're: lunch on friday?',
     body: 'Still on for the place near the office? I can do 12:30 if that works better for you this week.',
     receivedAt: 'Yesterday',
+    receivedAtMs: NOW - 1 * DAY - 2 * HOUR,
     unread: false,
+    source: 'sample',
   },
   {
     id: 'e4',
@@ -44,7 +54,9 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     subject: 'Scheduled maintenance this weekend',
     body: 'The internal file server will be unavailable Saturday 10pm to Sunday 2am for routine maintenance. No action is required.',
     receivedAt: 'Yesterday',
+    receivedAtMs: NOW - 1 * DAY - 6 * HOUR,
     unread: false,
+    source: 'sample',
   },
   {
     id: 'e5',
@@ -55,7 +67,9 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     body: 'Congratulations!!! You have been selected for a limited-time cash reward. Click the link below immediately to claim before it expires. Act now, this offer will not last.',
     listUnsubscribe: true,
     receivedAt: '2 days ago',
+    receivedAtMs: NOW - 2 * DAY,
     unread: true,
+    source: 'sample',
   },
   {
     id: 'e6',
@@ -65,7 +79,9 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     subject: 'Draft slides for Thursday',
     body: 'Attached is a first pass at the slides for Thursday. Mostly looking for feedback on the risk section, the rest is fairly settled.',
     receivedAt: '2 days ago',
+    receivedAtMs: NOW - 2 * DAY - 5 * HOUR,
     unread: false,
+    source: 'sample',
   },
   {
     id: 'e7',
@@ -75,7 +91,9 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     subject: 'Happy birthday!',
     body: 'Hope you have a great one this year. Cake in the break room at 3 if you want to swing by.',
     receivedAt: '3 days ago',
+    receivedAtMs: NOW - 3 * DAY,
     unread: false,
+    source: 'sample',
   },
   {
     id: 'e8',
@@ -85,6 +103,8 @@ export const SAMPLE_EMAILS: SampleEmail[] = [
     subject: 'Parking garage closure notice',
     body: 'Level 3 of the parking garage will be closed for repaving starting Monday. Please use levels 1, 2, or 4 until further notice.',
     receivedAt: '4 days ago',
+    receivedAtMs: NOW - 4 * DAY,
     unread: false,
+    source: 'sample',
   },
 ]

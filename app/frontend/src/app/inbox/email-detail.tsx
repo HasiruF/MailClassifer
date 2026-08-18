@@ -1,7 +1,38 @@
 'use client'
 
+import type { ReactNode } from 'react'
+import { Archive, ArchiveRestore, ExternalLink, Mail, MailOpen } from 'lucide-react'
 import { useInbox } from './inbox-context'
+import { Avatar } from './avatar'
 import { DETAIL_BG, DETAIL_BORDER, DETAIL_FAINT, DETAIL_MUTED, HIGH, INK, MEDIUM } from './tokens'
+
+function ActionButton({
+  icon,
+  label,
+  onClick,
+  href,
+}: {
+  icon: ReactNode
+  label: string
+  onClick?: () => void
+  href?: string
+}) {
+  const className = 'flex items-center gap-1.5 font-mono text-[11px] tracking-wide focus-visible:outline-none focus-visible:ring-1'
+  if (href) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className={className} style={{ color: DETAIL_MUTED }}>
+        {icon}
+        {label}
+      </a>
+    )
+  }
+  return (
+    <button onClick={onClick} className={className} style={{ color: DETAIL_MUTED }}>
+      {icon}
+      {label}
+    </button>
+  )
+}
 
 function Bar({ label, value, color }: { label: string; value: number; color: string }) {
   return (
@@ -23,7 +54,7 @@ function Bar({ label, value, color }: { label: string; value: number; color: str
 }
 
 export function EmailDetail({ id }: { id: string }) {
-  const { rows, selectEmail } = useInbox()
+  const { rows, selectEmail, archivedIds, archiveEmail, unarchiveEmail, toggleRead } = useInbox()
   const row = rows.find((r) => r.id === id)
 
   if (!row) {
@@ -39,6 +70,7 @@ export function EmailDetail({ id }: { id: string }) {
 
   const priorityColor =
     row.result?.priority.bucket === 'high' ? HIGH : row.result?.priority.bucket === 'medium' ? MEDIUM : DETAIL_FAINT
+  const archived = archivedIds.has(row.id)
 
   return (
     <main className="min-h-screen" style={{ background: DETAIL_BG, color: INK }}>
@@ -47,16 +79,41 @@ export function EmailDetail({ id }: { id: string }) {
           ← INBOX
         </button>
 
-        <h1 className="mt-4 text-xl font-medium" style={{ color: INK }}>
-          {row.subject}
-        </h1>
-        <p className="mt-2 font-mono text-[11px]" style={{ color: DETAIL_MUTED }}>
-          FROM {row.fromName} &lt;{row.fromAddr}&gt; → {row.to} · {row.receivedAt}
-        </p>
+        <div className="mt-4 flex items-start gap-3">
+          <Avatar name={row.fromName} size="md" />
+          <div className="min-w-0 flex-1">
+            <h1 className="font-serif text-2xl font-medium" style={{ color: INK }}>
+              {row.subject}
+            </h1>
+            <p className="mt-1 font-mono text-[11px]" style={{ color: DETAIL_MUTED }}>
+              FROM {row.fromName} &lt;{row.fromAddr}&gt; → {row.to} · {row.receivedAt}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <ActionButton
+            icon={row.unread ? <MailOpen size={13} /> : <Mail size={13} />}
+            label={row.unread ? 'MARK READ' : 'MARK UNREAD'}
+            onClick={() => toggleRead(row.id)}
+          />
+          <ActionButton
+            icon={archived ? <ArchiveRestore size={13} /> : <Archive size={13} />}
+            label={archived ? 'MOVE TO INBOX' : 'ARCHIVE'}
+            onClick={() => (archived ? unarchiveEmail(row.id) : archiveEmail(row.id))}
+          />
+          {row.source === 'gmail' && (
+            <ActionButton
+              icon={<ExternalLink size={13} />}
+              label="OPEN IN GMAIL"
+              href={`https://mail.google.com/mail/u/0/#all/${row.id}`}
+            />
+          )}
+        </div>
 
         <div className="my-5 h-px" style={{ background: DETAIL_BORDER }} />
 
-        <p className="text-sm whitespace-pre-wrap" style={{ color: INK }}>
+        <p className="font-serif text-base leading-relaxed whitespace-pre-wrap" style={{ color: INK }}>
           {row.body}
         </p>
 

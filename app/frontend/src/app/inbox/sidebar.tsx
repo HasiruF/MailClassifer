@@ -45,6 +45,11 @@ export function Sidebar() {
     setFilter,
     onlyHigh,
     setOnlyHigh,
+    showArchived,
+    setShowArchived,
+    query,
+    setQuery,
+    archivedIds,
     selectedId,
     selectEmail,
     gmailStatus,
@@ -53,17 +58,41 @@ export function Sidebar() {
     refreshInbox,
   } = useInbox()
 
+  const live = (r: (typeof rows)[number]) => !archivedIds.has(r.id)
   const countFor = (cat: CategoryLabel | 'All') => {
     if (status === 'loading') return '·'
-    if (cat === 'All') return String(rows.length)
-    return String(rows.filter((r) => r.result?.category.label === cat).length)
+    if (cat === 'All') return String(rows.filter(live).length)
+    return String(rows.filter(live).filter((r) => r.result?.category.label === cat).length)
   }
-  const highCount = status === 'loading' ? '·' : String(rows.filter((r) => r.result?.priority.bucket === 'high').length)
+  const highCount =
+    status === 'loading' ? '·' : String(rows.filter(live).filter((r) => r.result?.priority.bucket === 'high').length)
   const inList = selectedId === null
+
+  function goToAll() {
+    setFilter('All')
+    setOnlyHigh(false)
+    setShowArchived(false)
+    selectEmail(null)
+  }
+  function goToCategory(c: CategoryLabel) {
+    setFilter(c)
+    setOnlyHigh(false)
+    setShowArchived(false)
+    selectEmail(null)
+  }
+  function goToHighPriority() {
+    setOnlyHigh(true)
+    setShowArchived(false)
+    selectEmail(null)
+  }
+  function goToArchived() {
+    setShowArchived(true)
+    selectEmail(null)
+  }
 
   return (
     <aside
-      className="flex w-52 shrink-0 flex-col gap-4 px-3 py-5"
+      className="flex w-56 shrink-0 flex-col gap-4 px-3 py-5"
       style={{ background: SIDEBAR_BG, borderRight: `1px solid ${BORDER}` }}
     >
       <button
@@ -74,28 +103,37 @@ export function Sidebar() {
         ◆ INBOX
       </button>
 
+      <label
+        className="flex items-center gap-1.5 rounded-sm px-2 py-1.5 focus-within:ring-1"
+        style={{ border: `1px solid ${BORDER}` }}
+      >
+        <span className="font-mono text-[11px]" style={{ color: FAINT }} aria-hidden>
+          {'>'}
+        </span>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="search mail"
+          aria-label="Search mail"
+          className="w-full bg-transparent font-mono text-[11px] tracking-wide outline-none placeholder:opacity-50"
+          style={{ color: INK }}
+        />
+      </label>
+
       <nav className="flex flex-col gap-0.5">
         <NavRow
-          active={inList && filter === 'All' && !onlyHigh}
+          active={inList && !showArchived && filter === 'All' && !onlyHigh}
           label="All Mail"
           count={countFor('All')}
-          onClick={() => {
-            setFilter('All')
-            setOnlyHigh(false)
-            selectEmail(null)
-          }}
+          onClick={goToAll}
         />
         {CATEGORIES.map((c) => (
           <NavRow
             key={c}
-            active={inList && filter === c && !onlyHigh}
+            active={inList && !showArchived && filter === c && !onlyHigh}
             label={c}
             count={countFor(c)}
-            onClick={() => {
-              setFilter(c)
-              setOnlyHigh(false)
-              selectEmail(null)
-            }}
+            onClick={() => goToCategory(c)}
           />
         ))}
       </nav>
@@ -104,14 +142,17 @@ export function Sidebar() {
 
       <nav className="flex flex-col gap-0.5">
         <NavRow
-          active={inList && onlyHigh}
+          active={inList && !showArchived && onlyHigh}
           label="High Priority"
           count={highCount}
           accent={HIGH}
-          onClick={() => {
-            setOnlyHigh(true)
-            selectEmail(null)
-          }}
+          onClick={goToHighPriority}
+        />
+        <NavRow
+          active={inList && showArchived}
+          label="Archived"
+          count={String(archivedIds.size)}
+          onClick={goToArchived}
         />
       </nav>
 
