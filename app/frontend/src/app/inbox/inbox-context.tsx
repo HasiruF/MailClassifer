@@ -24,6 +24,14 @@ interface InboxState {
   setFilter: (f: CategoryLabel | 'All') => void
   onlyHigh: boolean
   setOnlyHigh: (v: boolean) => void
+  showArchived: boolean
+  setShowArchived: (v: boolean) => void
+  query: string
+  setQuery: (q: string) => void
+  archivedIds: Set<string>
+  archiveEmail: (id: string) => void
+  unarchiveEmail: (id: string) => void
+  toggleRead: (id: string) => void
   selectedId: string | null
   selectEmail: (id: string | null) => void
   gmailStatus: GmailStatus
@@ -40,6 +48,26 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   const [rows, setRows] = useState<Row[]>(SAMPLE_EMAILS.map((e) => ({ ...e, result: null })))
   const [filter, setFilter] = useState<CategoryLabel | 'All'>('All')
   const [onlyHigh, setOnlyHigh] = useState(false)
+  const [showArchived, setShowArchived] = useState(false)
+  const [query, setQuery] = useState('')
+  // Archive/read state is client-only (this app has no server to persist
+  // to) — real, working actions for the current session, not wired to
+  // Gmail itself (archiving here never touches the real inbox).
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set())
+
+  function archiveEmail(id: string) {
+    setArchivedIds((prev) => new Set(prev).add(id))
+  }
+  function unarchiveEmail(id: string) {
+    setArchivedIds((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
+    })
+  }
+  function toggleRead(id: string) {
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, unread: !r.unread } : r)))
+  }
   // Detail view is client-side state, not a /inbox/[id] route — Gmail
   // message IDs only exist at runtime (after fetch), so a dynamic
   // filesystem route could never satisfy generateStaticParams() under
@@ -161,6 +189,14 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         setFilter,
         onlyHigh,
         setOnlyHigh,
+        showArchived,
+        setShowArchived,
+        query,
+        setQuery,
+        archivedIds,
+        archiveEmail,
+        unarchiveEmail,
+        toggleRead,
         selectedId,
         selectEmail: setSelectedId,
         gmailStatus,

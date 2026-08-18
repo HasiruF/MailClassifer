@@ -111,6 +111,8 @@ function formatReceivedAt(dateHeader: string): string {
 function messageToInboxEmail(msg: GmailMessage): InboxEmail {
   const headers = msg.payload.headers
   const { fromName, fromAddr } = parseFrom(header(headers, 'From'))
+  const dateHeader = header(headers, 'Date')
+  const parsedMs = Date.parse(dateHeader)
   return {
     id: msg.id,
     subject: header(headers, 'Subject'),
@@ -121,8 +123,10 @@ function messageToInboxEmail(msg: GmailMessage): InboxEmail {
     fromName,
     listUnsubscribe: header(headers, 'List-Unsubscribe') !== '',
     precedence: header(headers, 'Precedence') || undefined,
-    receivedAt: formatReceivedAt(header(headers, 'Date')),
+    receivedAt: formatReceivedAt(dateHeader),
+    receivedAtMs: Number.isNaN(parsedMs) ? Date.now() : parsedMs,
     unread: (msg.labelIds ?? []).includes('UNREAD'),
+    source: 'gmail',
   }
 }
 
