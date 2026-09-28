@@ -1,11 +1,15 @@
 // "Signal Console" shared tokens. Cool navy shell (nav/list/chrome) vs a
-// warm dark-wood interior for an opened message — closed mail is cool,
-// reading one warms up, like unsealing a letter. Color is functional: sky
-// blue means "medium," burnt orange means "high," nothing else gets a
-// signal color. Type follows the same split (see layout.tsx): IBM Plex
-// Mono for all console chrome (nav, badges, metadata), Newsreader serif
-// only inside an opened message's subject/body — the one place text is
-// read rather than scanned.
+// warm near-black interior for an opened message — closed mail is cool,
+// reading one warms up, like a desk lamp over dark wood at night. (An
+// earlier pass used a literal mid-brown here — read as a muddy paint
+// swatch rather than "warm," not enough contrast headroom for text.
+// Near-black-with-warm-undertone keeps the same cool→warm logic with the
+// contrast of the rest of the app.) Color is functional: sky blue means
+// "medium," burnt orange means "high," nothing else gets a signal color.
+// Type follows the same split (see layout.tsx): IBM Plex Mono for all
+// console chrome (nav, badges, metadata), Newsreader serif only inside an
+// opened message's subject/body — the one place text is read rather than
+// scanned.
 export const INK = '#F5E9D8'
 export const INK_DIM = '#D9CBB0'
 export const MUTED = '#8B93A6'
@@ -19,11 +23,11 @@ export const HIGH = '#E76F2E'
 export const SPAM = MUTED
 export const ERROR = '#E76F2E'
 
-// The opened-message page: warm dark wood instead of cool navy.
-export const DETAIL_BG = '#3E2C23'
-export const DETAIL_BORDER = '#5A4534'
-export const DETAIL_MUTED = '#B8A688'
-export const DETAIL_FAINT = '#7A6A50'
+// The opened-message page: warm near-black instead of cool navy.
+export const DETAIL_BG = '#171310'
+export const DETAIL_BORDER = '#332A22'
+export const DETAIL_MUTED = '#C4A572'
+export const DETAIL_FAINT = '#6B5D4A'
 
 // Low-priority rows recede — the model already said "don't worry about
 // this one," so the row itself goes gray instead of just its label.
