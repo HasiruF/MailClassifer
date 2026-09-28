@@ -9,6 +9,11 @@ class Settings(BaseSettings):
     postgres_db: str
     database_port: int = 5433
 
+    google_client_id: str
+    google_client_secret: str
+    google_redirect_uri: str
+    frontend_url: str
+
     @property
     def database_url(self) -> str:
         return (
