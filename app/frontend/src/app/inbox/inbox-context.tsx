@@ -1,7 +1,7 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { loadModels, modelsLoaded, classify } from '@/inference/engine'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { applyPersonalizedModels, buildCorrectionVector, classify, loadModels, modelsLoaded } from '@/inference/engine'
 import {
   startGmailConnect,
   fetchGmailAccessToken,
@@ -10,18 +10,36 @@ import {
   clearStoredGmailToken,
 } from '@/lib/gmail-auth'
 import { fetchRecentInboxEmails } from '@/lib/gmail-fetch'
-import type { ClassificationResult, CategoryLabel, InboxEmail } from '@/types'
+import { applyCorrections, predictedFor } from '@/lib/corrections'
+import {
+  fetchActiveModels,
+  getStatus,
+  retrainNow,
+  setEnabled,
+  submitCorrection,
+  type CorrectionResponse,
+  type PersonalizationStatus,
+} from '@/lib/personalization-api'
+import { toSparse } from '@/lib/sparse'
+import type { ClassificationResult, InboxEmail, PersonalizableModel, PersonalizedModelArtifact } from '@/types'
 import { SAMPLE_EMAILS } from '@/data/sample-emails'
 
-export type Row = InboxEmail & { result: ClassificationResult | null }
+export type Row = InboxEmail & {
+  // What the UI renders: the model's output with this user's corrections
+  // applied on top (a correction always wins for the email it was made on).
+  result: ClassificationResult | null
+  // Raw model output, never overwritten. Corrections are built from this.
+  modelResult: ClassificationResult | null
+  corrected: Partial<Record<PersonalizableModel, string>>
+}
 export type GmailStatus = 'disconnected' | 'connecting' | 'fetching' | 'connected' | 'error'
 
 interface InboxState {
   rows: Row[]
   status: 'loading' | 'ready' | 'error'
   error: string | null
-  filter: CategoryLabel | 'All'
-  setFilter: (f: CategoryLabel | 'All') => void
+  filter: string
+  setFilter: (f: string) => void
   onlyHigh: boolean
   setOnlyHigh: (v: boolean) => void
   showArchived: boolean
@@ -38,6 +56,13 @@ interface InboxState {
   gmailError: string | null
   connectGmail: (rememberMe: boolean) => void
   refreshInbox: () => Promise<void>
+  personalization: PersonalizationStatus | null
+  personalizationError: string | null
+  retraining: boolean
+  correctEmail: (id: string, model: PersonalizableModel, label: string) => Promise<void>
+  enablePersonalization: () => Promise<boolean>
+  disablePersonalization: () => Promise<void>
+  retrainPersonalization: () => Promise<void>
 }
 
 const InboxContext = createContext<InboxState | null>(null)
@@ -52,18 +77,71 @@ const InboxContext = createContext<InboxState | null>(null)
 // promise, and same single-instance assumption (one InboxProvider per app).
 let fetchAndClassifyPromise: Promise<void> | null = null
 
+const RETRAIN_POLL_MS = 2000
+const RETRAIN_POLL_LIMIT = 60
+
+function emptyRow(email: InboxEmail): Row {
+  return { ...email, result: null, modelResult: null, corrected: {} }
+}
+
+function withResult(row: Row, result: ClassificationResult): Row {
+  return { ...row, modelResult: result, result: applyCorrections(result, row.corrected) }
+}
+
+function versionKey(artifacts: PersonalizedModelArtifact[]): string {
+  return artifacts
+    .map((a) => `${a.model}:${a.version}`)
+    .sort()
+    .join(',')
+}
+
+// Changes whenever any model records a new retrain attempt (active or
+// rejected), which is how the watcher knows a job finished.
+function attemptKey(status: PersonalizationStatus | null): string {
+  return (status?.models ?? []).map((m) => `${m.model}:${m.last_attempt?.version ?? 0}`).join(',')
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
 export function InboxProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
-  const [rows, setRows] = useState<Row[]>(SAMPLE_EMAILS.map((e) => ({ ...e, result: null })))
-  const [filter, setFilter] = useState<CategoryLabel | 'All'>('All')
+  const [rows, setRows] = useState<Row[]>(SAMPLE_EMAILS.map(emptyRow))
+  const [filter, setFilter] = useState<string>('All')
   const [onlyHigh, setOnlyHigh] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [query, setQuery] = useState('')
-  // Archive/read state is client-only (this app has no server to persist
-  // to) — real, working actions for the current session, not wired to
-  // Gmail itself (archiving here never touches the real inbox).
+  // Archive/read state is client-only — real, working actions for the
+  // current session, not wired to Gmail itself (archiving here never
+  // touches the real inbox).
   const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set())
+  // Detail view is client-side state, not a /inbox/[id] route — Gmail
+  // message IDs only exist at runtime (after fetch), so a dynamic
+  // filesystem route could never satisfy generateStaticParams() under
+  // output: 'export', which pre-renders every route at build time.
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [gmailStatus, setGmailStatus] = useState<GmailStatus>('disconnected')
+  const [gmailError, setGmailError] = useState<string | null>(null)
+  const [personalization, setPersonalization] = useState<PersonalizationStatus | null>(null)
+  const [personalizationError, setPersonalizationError] = useState<string | null>(null)
+  const [retraining, setRetraining] = useState(false)
+
+  // Async flows below outlive the render they started in; refs let them
+  // read current state instead of a stale closure.
+  const rowsRef = useRef<Row[]>(rows)
+  const personalizationRef = useRef<PersonalizationStatus | null>(null)
+  const appliedVersions = useRef('')
+
+  useEffect(() => {
+    rowsRef.current = rows
+  }, [rows])
+
+  function updatePersonalization(next: PersonalizationStatus) {
+    personalizationRef.current = next
+    setPersonalization(next)
+  }
 
   function archiveEmail(id: string) {
     setArchivedIds((prev) => new Set(prev).add(id))
@@ -78,13 +156,34 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   function toggleRead(id: string) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, unread: !r.unread } : r)))
   }
-  // Detail view is client-side state, not a /inbox/[id] route — Gmail
-  // message IDs only exist at runtime (after fetch), so a dynamic
-  // filesystem route could never satisfy generateStaticParams() under
-  // output: 'export', which pre-renders every route at build time.
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [gmailStatus, setGmailStatus] = useState<GmailStatus>('disconnected')
-  const [gmailError, setGmailError] = useState<string | null>(null)
+
+  // Loads this user's active personalized models into the engine, or
+  // reverts to base models when there are none or personalization is off.
+  // Returns whether the loaded set changed. Never throws: personalization
+  // is strictly additive, so a failure leaves the current models in place.
+  async function syncPersonalization(): Promise<boolean> {
+    try {
+      const next = await getStatus()
+      updatePersonalization(next)
+      const artifacts = next.enabled ? await fetchActiveModels() : []
+      const key = versionKey(artifacts)
+      if (key === appliedVersions.current) return false
+      await applyPersonalizedModels(artifacts)
+      appliedVersions.current = key
+      return true
+    } catch (err) {
+      setPersonalizationError(`Personalization unavailable, using base models: ${message(err)}`)
+      return false
+    }
+  }
+
+  async function reclassify(): Promise<void> {
+    for (const row of rowsRef.current) {
+      if (!row.modelResult) continue
+      const result = await classify(row)
+      setRows((prev) => prev.map((r) => (r.id === row.id ? withResult(r, result) : r)))
+    }
+  }
 
   function fetchAndClassify(token: string): Promise<void> {
     if (fetchAndClassifyPromise) return fetchAndClassifyPromise
@@ -93,21 +192,23 @@ export function InboxProvider({ children }: { children: ReactNode }) {
 
       await loadModels()
       if (!modelsLoaded()) throw new Error('models did not finish loading')
+      await syncPersonalization()
 
-      setRows(emails.map((e) => ({ ...e, result: null })))
+      setRows(emails.map(emptyRow))
       // Same WASM single-flight constraint as the sample-email loop below —
-      // classify() calls must go one at a time, not Promise.all.
+      // classify() calls go one at a time, not Promise.all.
       for (const email of emails) {
         const result = await classify(email)
-        setRows((prev) => prev.map((r) => (r.id === email.id ? { ...r, result } : r)))
+        setRows((prev) => prev.map((r) => (r.id === email.id ? withResult(r, result) : r)))
       }
     })()
-    // Clear once settled (success or failure) so the next real call —
-    // refreshInbox(), or a later reconnect — starts a fresh fetch instead of
-    // replaying this one's stale result.
-    fetchAndClassifyPromise.finally(() => {
+    // Clear once settled (success or failure) so the next real call starts a
+    // fresh fetch. Handled on both paths: a bare .finally() would re-reject
+    // into an unhandled rejection whenever the fetch fails.
+    const clear = () => {
       fetchAndClassifyPromise = null
-    })
+    }
+    fetchAndClassifyPromise.then(clear, clear)
     return fetchAndClassifyPromise
   }
 
@@ -123,8 +224,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
 
   // Always asks the backend for a fresh token rather than reusing the
   // cached one — that's what makes this silent instead of erroring once the
-  // cached access token expires. Only fails if the session cookie itself is
-  // gone or was never connected.
+  // cached access token expires.
   async function refreshInbox() {
     setGmailStatus('fetching')
     setGmailError(null)
@@ -135,8 +235,107 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       setGmailStatus('connected')
     } catch (err) {
       clearStoredGmailToken()
-      setGmailError(err instanceof Error ? err.message : String(err))
+      setGmailError(message(err))
       setGmailStatus('error')
+    }
+  }
+
+  function setCorrected(id: string, model: PersonalizableModel, label: string | undefined) {
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r
+        const corrected = { ...r.corrected }
+        if (label === undefined) delete corrected[model]
+        else corrected[model] = label
+        return { ...r, corrected, result: r.modelResult ? applyCorrections(r.modelResult, corrected) : r.result }
+      }),
+    )
+  }
+
+  // `before` is the attempt snapshot taken before the request that kicked
+  // off the retrain, so a job that finishes before the first poll still
+  // registers as a change.
+  async function watchRetrain(before: string): Promise<void> {
+    setRetraining(true)
+    try {
+      for (let i = 0; i < RETRAIN_POLL_LIMIT; i++) {
+        await new Promise((resolve) => setTimeout(resolve, RETRAIN_POLL_MS))
+        const next = await getStatus()
+        updatePersonalization(next)
+        if (!next.models.some((m) => m.running) && attemptKey(next) !== before) break
+      }
+      if (await syncPersonalization()) await reclassify()
+    } catch (err) {
+      setPersonalizationError(message(err))
+    } finally {
+      setRetraining(false)
+    }
+  }
+
+  async function correctEmail(id: string, model: PersonalizableModel, label: string): Promise<void> {
+    const row = rowsRef.current.find((r) => r.id === id)
+    if (!row?.modelResult || row.source !== 'gmail') return
+    const before = attemptKey(personalizationRef.current)
+    const previous = row.corrected[model]
+    const predicted = predictedFor(model, row.modelResult)
+    setCorrected(id, model, label)
+    setPersonalizationError(null)
+
+    let response: CorrectionResponse
+    try {
+      response = await submitCorrection({
+        model,
+        provider_message_id: id,
+        feature_vector: toSparse(buildCorrectionVector(row, model, row.modelResult)),
+        predicted_label: predicted.label,
+        predicted_confidence: Math.min(1, Math.max(0, predicted.confidence)),
+        corrected_label: label,
+      })
+    } catch (err) {
+      setCorrected(id, model, previous)
+      setPersonalizationError(`Correction not saved: ${message(err)}`)
+      return
+    }
+    try {
+      updatePersonalization(await getStatus())
+    } catch (err) {
+      setPersonalizationError(message(err))
+    }
+    if (response.retrain_scheduled) void watchRetrain(before)
+  }
+
+  async function enablePersonalization(): Promise<boolean> {
+    setPersonalizationError(null)
+    try {
+      await setEnabled(true)
+      updatePersonalization(await getStatus())
+      return true
+    } catch (err) {
+      setPersonalizationError(`Could not turn on personalization: ${message(err)}`)
+      return false
+    }
+  }
+
+  async function disablePersonalization(): Promise<void> {
+    setPersonalizationError(null)
+    try {
+      await setEnabled(false)
+    } catch (err) {
+      setPersonalizationError(`Could not turn off personalization: ${message(err)}`)
+      return
+    }
+    setRows((prev) => prev.map((r) => ({ ...r, corrected: {}, result: r.modelResult })))
+    if (await syncPersonalization()) await reclassify()
+  }
+
+  async function retrainPersonalization(): Promise<void> {
+    const before = attemptKey(personalizationRef.current)
+    setPersonalizationError(null)
+    try {
+      const { scheduled } = await retrainNow()
+      if (scheduled.length > 0) await watchRetrain(before)
+    } catch (err) {
+      setPersonalizationError(`Retrain did not start: ${message(err)}`)
     }
   }
 
@@ -144,15 +343,11 @@ export function InboxProvider({ children }: { children: ReactNode }) {
     let cancelled = false
     ;(async () => {
       // Cosmetic only — the session cookie from /auth/gmail/callback is
-      // already set by the time this page loads, the query param doesn't
-      // gate anything below.
+      // already set by the time this page loads.
       if (window.location.search.includes('connected=1')) {
         window.history.replaceState({}, '', window.location.pathname)
       }
 
-      // Resume silently if a still-valid token survived a page reload —
-      // skips the sample-email classification entirely rather than
-      // flashing sample data before replacing it with the real inbox.
       const stored = loadStoredGmailToken()
       if (stored) {
         setGmailStatus('fetching')
@@ -166,17 +361,15 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         } catch (err) {
           clearStoredGmailToken()
           if (!cancelled) {
-            setGmailError(err instanceof Error ? err.message : String(err))
+            setGmailError(message(err))
             setGmailStatus('error')
           }
           // fall through to the sample-email view below
         }
       } else {
         // No cached access token — try the backend session cookie before
-        // giving up. Succeeds silently (no popup, no redirect) whenever a
-        // prior connection is still alive: same tab after the cached token
-        // expired, a fresh tab in the same browser, or a returning
-        // remember-me session days later.
+        // giving up. Succeeds silently whenever a prior connection is still
+        // alive.
         try {
           const token = await fetchGmailAccessToken()
           saveGmailToken(token)
@@ -188,27 +381,23 @@ export function InboxProvider({ children }: { children: ReactNode }) {
           }
           return
         } catch {
-          // Not connected yet — fall through to the sample-email view below,
-          // stay in 'disconnected' status (not 'error'; this is the normal
-          // first-visit state).
+          // Not connected yet — stay 'disconnected' (the normal first-visit
+          // state) and fall through to the sample-email view below.
         }
       }
 
       try {
         await loadModels()
         if (!modelsLoaded()) throw new Error('models did not finish loading')
-        // classify() can't run concurrently — onnxruntime-web's WASM
-        // backend throws "Session already started" if two .run() calls
-        // overlap — so these go one at a time, not Promise.all.
         for (const email of SAMPLE_EMAILS) {
           if (cancelled) return
           const result = await classify(email)
-          setRows((prev) => prev.map((r) => (r.id === email.id ? { ...r, result } : r)))
+          setRows((prev) => prev.map((r) => (r.id === email.id ? withResult(r, result) : r)))
         }
         if (!cancelled) setStatus('ready')
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err))
+          setError(message(err))
           setStatus('error')
         }
       }
@@ -216,6 +405,10 @@ export function InboxProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
+    // Mount-only on purpose: fetchAndClassify dedupes through the
+    // module-level memo above, and its helpers read current state via refs,
+    // so re-running this on every render would only re-fetch the inbox.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (
@@ -242,6 +435,13 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         gmailError,
         connectGmail,
         refreshInbox,
+        personalization,
+        personalizationError,
+        retraining,
+        correctEmail,
+        enablePersonalization,
+        disablePersonalization,
+        retrainPersonalization,
       }}
     >
       {children}
