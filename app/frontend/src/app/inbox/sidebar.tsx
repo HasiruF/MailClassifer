@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useInbox } from './inbox-context'
 import { BORDER, FAINT, HIGH, INK, MUTED, SIDEBAR_BG } from './tokens'
 import type { CategoryLabel } from '@/types'
@@ -57,6 +58,8 @@ export function Sidebar() {
     connectGmail,
     refreshInbox,
   } = useInbox()
+
+  const [rememberMe, setRememberMe] = useState(true)
 
   const live = (r: (typeof rows)[number]) => !archivedIds.has(r.id)
   const countFor = (cat: CategoryLabel | 'All') => {
@@ -158,30 +161,43 @@ export function Sidebar() {
 
       <div className="h-px" style={{ background: BORDER }} />
 
-      <div className="flex items-center justify-between gap-1">
-        <button
-          onClick={connectGmail}
-          disabled={gmailStatus === 'connecting' || gmailStatus === 'fetching' || gmailStatus === 'connected'}
-          className="flex-1 px-1 text-left font-mono text-[10px] tracking-wide disabled:cursor-default"
-          style={{ color: gmailStatus === 'error' ? HIGH : gmailStatus === 'connected' ? INK : MUTED }}
-          title={gmailStatus === 'error' ? (gmailError ?? undefined) : undefined}
-        >
-          {gmailStatus === 'disconnected' && '○ CONNECT GMAIL'}
-          {gmailStatus === 'connecting' && '○ CONNECTING…'}
-          {gmailStatus === 'fetching' && '○ FETCHING INBOX…'}
-          {gmailStatus === 'connected' && '● GMAIL CONNECTED'}
-          {gmailStatus === 'error' && '○ GMAIL ERROR — RETRY'}
-        </button>
-        {gmailStatus === 'connected' && (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center justify-between gap-1">
           <button
-            onClick={refreshInbox}
-            className="px-1 font-mono text-[11px]"
-            style={{ color: MUTED }}
-            title="Refresh inbox"
-            aria-label="Refresh inbox"
+            onClick={() => connectGmail(rememberMe)}
+            disabled={gmailStatus === 'connecting' || gmailStatus === 'fetching' || gmailStatus === 'connected'}
+            className="flex-1 px-1 text-left font-mono text-[10px] tracking-wide disabled:cursor-default"
+            style={{ color: gmailStatus === 'error' ? HIGH : gmailStatus === 'connected' ? INK : MUTED }}
+            title={gmailStatus === 'error' ? (gmailError ?? undefined) : undefined}
           >
-            ↻
+            {gmailStatus === 'disconnected' && '○ CONNECT GMAIL'}
+            {gmailStatus === 'connecting' && '○ CONNECTING…'}
+            {gmailStatus === 'fetching' && '○ FETCHING INBOX…'}
+            {gmailStatus === 'connected' && '● GMAIL CONNECTED'}
+            {gmailStatus === 'error' && '○ GMAIL ERROR — RETRY'}
           </button>
+          {gmailStatus === 'connected' && (
+            <button
+              onClick={refreshInbox}
+              className="px-1 font-mono text-[11px]"
+              style={{ color: MUTED }}
+              title="Refresh inbox"
+              aria-label="Refresh inbox"
+            >
+              ↻
+            </button>
+          )}
+        </div>
+        {(gmailStatus === 'disconnected' || gmailStatus === 'error') && (
+          <label className="flex items-center gap-1.5 px-1 font-mono text-[10px] tracking-wide" style={{ color: FAINT }}>
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="size-3"
+            />
+            remember me
+          </label>
         )}
       </div>
 

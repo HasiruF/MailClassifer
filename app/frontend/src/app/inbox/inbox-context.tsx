@@ -3,11 +3,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { loadModels, modelsLoaded, classify } from '@/inference/engine'
 import {
-  requestGmailAccessToken,
+  startGmailConnect,
+  fetchGmailAccessToken,
   loadStoredGmailToken,
   saveGmailToken,
   clearStoredGmailToken,
-  type GmailToken,
 } from '@/lib/gmail-auth'
 import { fetchRecentInboxEmails } from '@/lib/gmail-fetch'
 import type { ClassificationResult, CategoryLabel, InboxEmail } from '@/types'
@@ -36,11 +36,21 @@ interface InboxState {
   selectEmail: (id: string | null) => void
   gmailStatus: GmailStatus
   gmailError: string | null
-  connectGmail: () => Promise<void>
+  connectGmail: (rememberMe: boolean) => void
   refreshInbox: () => Promise<void>
 }
 
 const InboxContext = createContext<InboxState | null>(null)
+
+// Module-level guard against React Strict Mode's dev-only double-invoke of
+// the mount effect below: without it, two concurrent invocations each
+// independently mint a Gmail access token and fetch the inbox, doubling
+// concurrent Gmail API requests past its per-user rate limit (confirmed via
+// a headless-browser repro — both runs failed with 403, and the resume
+// path's catch swallowed it silently, freezing the UI at "FETCHING
+// INBOX..." forever). Same pattern as engine.ts's loadModels() memoized
+// promise, and same single-instance assumption (one InboxProvider per app).
+let fetchAndClassifyPromise: Promise<void> | null = null
 
 export function InboxProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -75,51 +85,53 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [gmailStatus, setGmailStatus] = useState<GmailStatus>('disconnected')
   const [gmailError, setGmailError] = useState<string | null>(null)
-  // Kept so refreshInbox() can re-fetch without popping the OAuth consent
-  // screen again, and so a page reload can silently resume (see the mount
-  // effect below) instead of dropping back to the sample-email view. GIS
-  // access tokens are short-lived (~1hr); once expired, the Gmail API call
-  // fails and surfaces as the normal error state, recoverable via the main
-  // button (fresh connectGmail call, new token).
-  const [gmailToken, setGmailToken] = useState<GmailToken | null>(null)
 
-  async function fetchAndClassify(token: string) {
-    const emails = await fetchRecentInboxEmails(token)
+  function fetchAndClassify(token: string): Promise<void> {
+    if (fetchAndClassifyPromise) return fetchAndClassifyPromise
+    fetchAndClassifyPromise = (async () => {
+      const emails = await fetchRecentInboxEmails(token)
 
-    await loadModels()
-    if (!modelsLoaded()) throw new Error('models did not finish loading')
+      await loadModels()
+      if (!modelsLoaded()) throw new Error('models did not finish loading')
 
-    setRows(emails.map((e) => ({ ...e, result: null })))
-    // Same WASM single-flight constraint as the sample-email loop below —
-    // classify() calls must go one at a time, not Promise.all.
-    for (const email of emails) {
-      const result = await classify(email)
-      setRows((prev) => prev.map((r) => (r.id === email.id ? { ...r, result } : r)))
-    }
+      setRows(emails.map((e) => ({ ...e, result: null })))
+      // Same WASM single-flight constraint as the sample-email loop below —
+      // classify() calls must go one at a time, not Promise.all.
+      for (const email of emails) {
+        const result = await classify(email)
+        setRows((prev) => prev.map((r) => (r.id === email.id ? { ...r, result } : r)))
+      }
+    })()
+    // Clear once settled (success or failure) so the next real call —
+    // refreshInbox(), or a later reconnect — starts a fresh fetch instead of
+    // replaying this one's stale result.
+    fetchAndClassifyPromise.finally(() => {
+      fetchAndClassifyPromise = null
+    })
+    return fetchAndClassifyPromise
   }
 
-  async function connectGmail() {
+  // Navigates away to the backend's OAuth start route — nothing after this
+  // runs in this tab. The page that loads on return (/inbox) picks the
+  // connection up silently via the mount effect below, since the session
+  // cookie is already set by the time Google redirects back.
+  function connectGmail(rememberMe: boolean) {
     setGmailStatus('connecting')
     setGmailError(null)
-    try {
-      const token = await requestGmailAccessToken()
-      setGmailToken(token)
-      saveGmailToken(token)
-      setGmailStatus('fetching')
-      await fetchAndClassify(token.accessToken)
-      setGmailStatus('connected')
-    } catch (err) {
-      setGmailError(err instanceof Error ? err.message : String(err))
-      setGmailStatus('error')
-    }
+    startGmailConnect(rememberMe)
   }
 
+  // Always asks the backend for a fresh token rather than reusing the
+  // cached one — that's what makes this silent instead of erroring once the
+  // cached access token expires. Only fails if the session cookie itself is
+  // gone or was never connected.
   async function refreshInbox() {
-    if (!gmailToken) return
     setGmailStatus('fetching')
     setGmailError(null)
     try {
-      await fetchAndClassify(gmailToken.accessToken)
+      const token = await fetchGmailAccessToken()
+      saveGmailToken(token)
+      await fetchAndClassify(token.accessToken)
       setGmailStatus('connected')
     } catch (err) {
       clearStoredGmailToken()
@@ -131,12 +143,18 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false
     ;(async () => {
+      // Cosmetic only — the session cookie from /auth/gmail/callback is
+      // already set by the time this page loads, the query param doesn't
+      // gate anything below.
+      if (window.location.search.includes('connected=1')) {
+        window.history.replaceState({}, '', window.location.pathname)
+      }
+
       // Resume silently if a still-valid token survived a page reload —
       // skips the sample-email classification entirely rather than
       // flashing sample data before replacing it with the real inbox.
       const stored = loadStoredGmailToken()
       if (stored) {
-        setGmailToken(stored)
         setGmailStatus('fetching')
         try {
           await fetchAndClassify(stored.accessToken)
@@ -152,6 +170,27 @@ export function InboxProvider({ children }: { children: ReactNode }) {
             setGmailStatus('error')
           }
           // fall through to the sample-email view below
+        }
+      } else {
+        // No cached access token — try the backend session cookie before
+        // giving up. Succeeds silently (no popup, no redirect) whenever a
+        // prior connection is still alive: same tab after the cached token
+        // expired, a fresh tab in the same browser, or a returning
+        // remember-me session days later.
+        try {
+          const token = await fetchGmailAccessToken()
+          saveGmailToken(token)
+          setGmailStatus('fetching')
+          await fetchAndClassify(token.accessToken)
+          if (!cancelled) {
+            setGmailStatus('connected')
+            setStatus('ready')
+          }
+          return
+        } catch {
+          // Not connected yet — fall through to the sample-email view below,
+          // stay in 'disconnected' status (not 'error'; this is the normal
+          // first-visit state).
         }
       }
 
