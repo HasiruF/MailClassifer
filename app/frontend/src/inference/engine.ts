@@ -1,5 +1,12 @@
 import * as ort from 'onnxruntime-web'
-import type { EmailInput, ClassificationResult, CategoryLabel, PriorityBucket } from '../types'
+import type {
+  EmailInput,
+  ClassificationResult,
+  CategoryLabel,
+  PersonalizableModel,
+  PersonalizedModelArtifact,
+  PriorityBucket,
+} from '../types'
 import {
   cleanText,
   buildSpamVector,
@@ -38,7 +45,34 @@ const MODEL_PATHS = {
 
 type ModelKey = keyof typeof MODEL_PATHS
 
-let sessions: Partial<Record<ModelKey, ort.InferenceSession>> = {}
+type Sessions = Partial<Record<ModelKey, ort.InferenceSession>>
+
+// Backend model names (personalized_models.model) → this module's keys.
+const BACKEND_MODEL_KEYS: Record<PersonalizedModelArtifact['model'], ModelKey> = {
+  spam: 'spam',
+  category: 'category',
+  priority: 'priority',
+  priority_regressor: 'priorityRegressor',
+}
+
+let baseSessions: Sessions = {}
+let sessions: Sessions = {}
+let personalSessions: ort.InferenceSession[] = []
+// Output class order for personalized graphs (a personalized category
+// model can have custom classes the shared vocab.json doesn't know about).
+let classesOverride: Partial<Record<ModelKey, (string | number)[]>> = {}
+
+// onnxruntime-web's WASM backend tolerates only one session operation
+// (create or run) in flight at a time. classify() already awaits its own
+// .run() calls in sequence; this chain extends that guarantee across
+// callers, so a personalized-model swap can never overlap a classify().
+let engineChain: Promise<unknown> = Promise.resolve()
+function exclusive<T>(fn: () => Promise<T>): Promise<T> {
+  const run = engineChain.then(fn)
+  engineChain = run.catch(() => undefined)
+  return run
+}
+
 let spamVocab: SpamVocab | null = null
 let categoryVocab: CategoryVocab | null = null
 let priorityVocab: PriorityVocab | null = null
@@ -78,7 +112,8 @@ export function loadModels(): Promise<void> {
     for (const key of Object.keys(MODEL_PATHS) as ModelKey[]) {
       newSessions[key] = await ort.InferenceSession.create(MODEL_PATHS[key])
     }
-    sessions = newSessions
+    baseSessions = newSessions
+    sessions = { ...newSessions }
 
     await vocabPromise
   })()
@@ -87,11 +122,51 @@ export function loadModels(): Promise<void> {
 
 export function modelsLoaded(): boolean {
   return (
-    Object.keys(sessions).length === Object.keys(MODEL_PATHS).length &&
+    Object.keys(baseSessions).length === Object.keys(MODEL_PATHS).length &&
     spamVocab !== null &&
     categoryVocab !== null &&
     priorityVocab !== null
   )
+}
+
+export function applyPersonalizedModels(artifacts: PersonalizedModelArtifact[]): Promise<void> {
+  return exclusive(async () => {
+    const created: ort.InferenceSession[] = []
+    const next: Sessions = { ...baseSessions }
+    const nextClasses: typeof classesOverride = {}
+    try {
+      for (const artifact of artifacts) {
+        const key = BACKEND_MODEL_KEYS[artifact.model]
+        const session = await ort.InferenceSession.create(new Uint8Array(artifact.bytes))
+        created.push(session)
+        next[key] = session
+        nextClasses[key] = artifact.classes
+      }
+    } catch (err) {
+      for (const session of created) await session.release()
+      throw err
+    }
+    const retired = personalSessions
+    sessions = next
+    classesOverride = nextClasses
+    personalSessions = created
+    for (const session of retired) await session.release()
+  })
+}
+
+export function buildCorrectionVector(
+  email: EmailInput,
+  model: PersonalizableModel,
+  result: ClassificationResult,
+): Float32Array {
+  if (!spamVocab || !categoryVocab || !priorityVocab) {
+    throw new Error('Models not loaded — call loadModels() first.')
+  }
+  const cleanedText = cleanText(`${email.subject} ${email.body}`)
+  if (model === 'spam') return buildSpamVector(cleanedText, spamVocab)
+  if (model === 'category') return buildCategoryVector(email, cleanedText, categoryVocab)
+  const { categoryLabel, spamConf, vaderCompound } = result.inputs
+  return buildPriorityVector(email, cleanedText, categoryLabel, spamConf, vaderCompound, priorityVocab)
 }
 
 function requireSession(key: ModelKey): ort.InferenceSession {
@@ -100,7 +175,11 @@ function requireSession(key: ModelKey): ort.InferenceSession {
   return s
 }
 
-export async function classify(email: EmailInput): Promise<ClassificationResult> {
+export function classify(email: EmailInput): Promise<ClassificationResult> {
+  return exclusive(() => classifyNow(email))
+}
+
+async function classifyNow(email: EmailInput): Promise<ClassificationResult> {
   if (!modelsLoaded() || !spamVocab || !categoryVocab || !priorityVocab) {
     throw new Error('Models not loaded — call loadModels() first.')
   }
@@ -112,7 +191,7 @@ export async function classify(email: EmailInput): Promise<ClassificationResult>
   const spamFeeds = { features: new ort.Tensor('float32', spamVec, [1, spamVec.length]) }
   const spamOut = await requireSession('spam').run(spamFeeds)
   const spamProba = spamOut.probabilities.data as Float32Array
-  const spamIdx = spamVocab.classes.indexOf(1)
+  const spamIdx = ((classesOverride.spam ?? spamVocab.classes) as number[]).indexOf(1)
   const spamConf = spamProba[spamIdx]
   const spamLabel = spamConf >= 0.5 ? 'spam' : 'ham'
 
@@ -123,7 +202,7 @@ export async function classify(email: EmailInput): Promise<ClassificationResult>
   const categoryProba = categoryOut.probabilities.data as Float32Array
   const categoryLabel = (categoryOut.label.data as string[])[0] as CategoryLabel
   const categoryConfidences: Record<string, number> = {}
-  categoryVocab.classes.forEach((cls, i) => {
+  ;((classesOverride.category ?? categoryVocab.classes) as string[]).forEach((cls, i) => {
     categoryConfidences[cls] = categoryProba[i]
   })
 
@@ -141,7 +220,7 @@ export async function classify(email: EmailInput): Promise<ClassificationResult>
   const priorityBucket = (priorityClfOut.label.data as string[])[0] as PriorityBucket
   const priorityProba = priorityClfOut.probabilities.data as Float32Array
   const priorityConfidences: Record<string, number> = {}
-  priorityVocab.classes.forEach((cls, i) => {
+  ;((classesOverride.priority ?? priorityVocab.classes) as string[]).forEach((cls, i) => {
     priorityConfidences[cls] = priorityProba[i]
   })
   // skl2onnx names a bare regressor's sole output "variable" — confirmed
