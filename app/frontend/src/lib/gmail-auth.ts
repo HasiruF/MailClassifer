@@ -1,103 +1,57 @@
-// Client-side Google OAuth via Google Identity Services (GIS) token client.
-// No backend and no client secret involved — GIS's token-client flow hands
-// an access token straight to browser JS via a popup, which is the
-// supported no-server pattern for a static-export app. The script itself
-// must load from Google's own domain (can't be bundled/self-hosted), same
-// reasoning as fetching onnxruntime-web's WASM from a CDN in engine.ts.
-// The access token itself is short-lived (~1hr) and read-only-scoped, so
-// the caller (inbox-context.tsx) caches it in sessionStorage to survive a
-// page reload — deliberately NOT a refresh token, which would need a
-// backend to hold safely and isn't part of this app.
+// Gmail auth via the backend token-holder (see app/backend/src/routers/auth.py)
+// instead of Google Identity Services' popup token-client flow. GIS's flow
+// structurally never issues a refresh token, so it hit a hard ~1hr re-auth
+// wall for every user with no way around it. The backend now holds the
+// refresh token (in Postgres if "remember me" was checked, otherwise only in
+// an in-process dict — see memory_store.py) behind an httpOnly session
+// cookie, and mints a fresh access token on request. This module never sees
+// the refresh token itself, only the short-lived access token it gets back.
 
-const GIS_SRC = 'https://accounts.google.com/gsi/client'
-const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
-const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
-
-interface TokenResponse {
-  access_token?: string
-  expires_in?: number
-  error?: string
-}
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3011'
 
 export interface GmailToken {
   accessToken: string
   expiresAt: number
 }
 
-interface TokenClient {
-  requestAccessToken: () => void
+// Navigates the whole page to the backend, which redirects to Google's
+// consent screen and (after the user approves) back to /inbox. Not a fetch —
+// the code-for-tokens exchange needs a client secret, so it can't happen via
+// an XHR/fetch call from browser JS, only a real top-level navigation through
+// Google's redirect chain.
+export function startGmailConnect(rememberMe: boolean): void {
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- destination is the backend's own origin, not an internal Next.js route
+  window.location.href = `${BACKEND_URL}/auth/gmail/start?remember_me=${rememberMe}`
 }
 
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        oauth2: {
-          initTokenClient(config: {
-            client_id: string
-            scope: string
-            callback: (resp: TokenResponse) => void
-          }): TokenClient
-        }
-      }
-    }
+export class NotConnectedError extends Error {}
+
+// Exchanges the httpOnly session cookie (sent automatically via
+// credentials: 'include') for a fresh ~1hr Gmail access token. Throws
+// NotConnectedError if there's no session cookie or it's not linked to a
+// Gmail connection yet — the caller falls back to the sample-email view.
+export async function fetchGmailAccessToken(): Promise<GmailToken> {
+  const res = await fetch(`${BACKEND_URL}/auth/gmail/token`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+  if (res.status === 401 || res.status === 404) {
+    throw new NotConnectedError('Not connected to Gmail')
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Gmail access token (${res.status})`)
+  }
+  const data = (await res.json()) as { access_token: string; expires_in: number }
+  return {
+    accessToken: data.access_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
   }
 }
 
-let scriptPromise: Promise<void> | null = null
-
-function loadGisScript(): Promise<void> {
-  if (scriptPromise) return scriptPromise
-  scriptPromise = new Promise((resolve, reject) => {
-    if (window.google?.accounts?.oauth2) {
-      resolve()
-      return
-    }
-    const script = document.createElement('script')
-    script.src = GIS_SRC
-    script.async = true
-    script.defer = true
-    script.onload = () => resolve()
-    script.onerror = () => reject(new Error('Failed to load Google Identity Services script'))
-    document.head.appendChild(script)
-  })
-  return scriptPromise
-}
-
-// Opens the Google account picker/consent popup and resolves with a
-// short-lived Gmail-readonly access token + its expiry. Rejects if the user
-// closes the popup, denies consent, or (in Testing publish status) isn't on
-// the project's test-user list.
-export async function requestGmailAccessToken(): Promise<GmailToken> {
-  if (!CLIENT_ID) {
-    throw new Error(
-      'NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set — add it to app/frontend/.env.local',
-    )
-  }
-  await loadGisScript()
-  return new Promise((resolve, reject) => {
-    const client = window.google!.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID,
-      scope: GMAIL_READONLY_SCOPE,
-      callback: (resp) => {
-        if (resp.error || !resp.access_token) {
-          reject(new Error(resp.error ?? 'Gmail authorization failed or was cancelled'))
-          return
-        }
-        resolve({
-          accessToken: resp.access_token,
-          expiresAt: Date.now() + (resp.expires_in ?? 3600) * 1000,
-        })
-      },
-    })
-    client.requestAccessToken()
-  })
-}
-
-// Cached across a page reload so the user doesn't have to re-click through
-// the consent popup every time — sessionStorage (not localStorage) so it
-// clears when the tab closes, and it's still just the short-lived
-// read-only access token, not a refresh token.
+// Cached across a page reload so every classify/fetch call doesn't have to
+// round-trip the backend — sessionStorage (not localStorage) so it clears
+// when the tab closes. Still just the short-lived access token, never
+// anything the backend gave us that we shouldn't persist client-side.
 const STORAGE_KEY = 'gmail_token_v1'
 
 export function loadStoredGmailToken(): GmailToken | null {
