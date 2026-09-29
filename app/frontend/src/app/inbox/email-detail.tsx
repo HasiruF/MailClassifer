@@ -1,10 +1,11 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Archive, ArchiveRestore, ExternalLink, Mail, MailOpen } from 'lucide-react'
-import type { CategoryLabel, PriorityBucket, SpamLabel } from '@/types'
+import type { CategoryLabel, PersonalizableModel, PriorityBucket, SpamLabel } from '@/types'
 import { useInbox } from './inbox-context'
 import { Avatar } from './avatar'
+import { CorrectionPicker, OptInPrompt } from './correction-picker'
 import { CATEGORY_COLOR, DETAIL_BG, DETAIL_BORDER, DETAIL_FAINT, DETAIL_MUTED, HIGH, INK, MEDIUM } from './tokens'
 
 function ActionButton({
@@ -122,6 +123,12 @@ function CategoryStrip({ confidences, winner }: { confidences: Record<string, nu
           </span>
         ))}
       </div>
+      {!order.includes(winner as CategoryLabel) && (
+        <p className="mt-2 font-mono text-[11px] tracking-wide uppercase" style={{ color: INK }}>
+          → {winner}
+          {confidences[winner] !== undefined && ` ${Math.round(confidences[winner] * 100)}%`}
+        </p>
+      )}
     </div>
   )
 }
@@ -144,8 +151,57 @@ function SpamBadge({ label, confidence }: { label: SpamLabel; confidence: number
   )
 }
 
+const FIXED_OPTIONS: Record<Exclude<PersonalizableModel, 'category'>, string[]> = {
+  priority: ['low', 'medium', 'high'],
+  spam: ['spam', 'ham'],
+}
+
+function SectionLabel({
+  title,
+  corrected,
+  onCorrect,
+  testId,
+}: {
+  title: string
+  corrected: boolean
+  onCorrect?: () => void
+  testId: string
+}) {
+  return (
+    <p className="mb-2 flex items-center gap-2 font-mono text-[10px] tracking-widest" style={{ color: DETAIL_FAINT }}>
+      {title}
+      {corrected && <span style={{ color: DETAIL_MUTED }}>· CORRECTED</span>}
+      {onCorrect && (
+        <button
+          type="button"
+          onClick={onCorrect}
+          data-testid={testId}
+          className="tracking-wide underline-offset-2 hover:underline"
+          style={{ color: DETAIL_MUTED }}
+        >
+          CORRECT
+        </button>
+      )}
+    </p>
+  )
+}
+
 export function EmailDetail({ id }: { id: string }) {
-  const { rows, selectEmail, archivedIds, archiveEmail, unarchiveEmail, toggleRead } = useInbox()
+  const {
+    rows,
+    selectEmail,
+    archivedIds,
+    archiveEmail,
+    unarchiveEmail,
+    toggleRead,
+    personalization,
+    personalizationError,
+    correctEmail,
+    enablePersonalization,
+  } = useInbox()
+  const [picking, setPicking] = useState<PersonalizableModel | null>(null)
+  const [optInFor, setOptInFor] = useState<PersonalizableModel | null>(null)
+  const [enabling, setEnabling] = useState(false)
   const row = rows.find((r) => r.id === id)
 
   if (!row) {
@@ -160,6 +216,56 @@ export function EmailDetail({ id }: { id: string }) {
   }
 
   const archived = archivedIds.has(row.id)
+  // Corrections need a real message id and a backend connection, so the
+  // hand-authored sample emails can't be corrected.
+  const canCorrect = row.source === 'gmail' && row.modelResult !== null
+
+  const startCorrecting = (model: PersonalizableModel) => {
+    if (personalization?.enabled) {
+      setOptInFor(null)
+      setPicking(model)
+    } else {
+      setPicking(null)
+      setOptInFor(model)
+    }
+  }
+
+  const confirmOptIn = async () => {
+    if (!optInFor) return
+    setEnabling(true)
+    const ok = await enablePersonalization()
+    setEnabling(false)
+    if (ok) {
+      setPicking(optInFor)
+      setOptInFor(null)
+    }
+  }
+
+  const pick = (model: PersonalizableModel, label: string) => {
+    setPicking(null)
+    void correctEmail(row.id, model, label)
+  }
+
+  const optionsFor = (model: PersonalizableModel): string[] =>
+    model === 'category' ? ['Work', 'Personal', 'Other', ...(personalization?.custom_labels ?? [])] : FIXED_OPTIONS[model]
+
+  const correctionUi = (model: PersonalizableModel, current: string) => {
+    if (optInFor === model) {
+      return <OptInPrompt busy={enabling} onEnable={() => void confirmOptIn()} onCancel={() => setOptInFor(null)} />
+    }
+    if (picking === model) {
+      return (
+        <CorrectionPicker
+          options={optionsFor(model)}
+          allowNew={model === 'category'}
+          current={current}
+          onPick={(label) => pick(model, label)}
+          onCancel={() => setPicking(null)}
+        />
+      )
+    }
+    return null
+  }
 
   return (
     <main className="min-h-screen" style={{ background: DETAIL_BG, color: INK }}>
@@ -219,32 +325,50 @@ export function EmailDetail({ id }: { id: string }) {
         ) : (
           <div className="flex flex-col gap-5">
             <div>
-              <p className="mb-2 font-mono text-[10px] tracking-widest" style={{ color: DETAIL_FAINT }}>
-                CATEGORY
-              </p>
+              <SectionLabel
+                title="CATEGORY"
+                corrected={row.corrected.category !== undefined}
+                onCorrect={canCorrect ? () => startCorrecting('category') : undefined}
+                testId="correct-category"
+              />
               <CategoryStrip confidences={row.result.category.confidences} winner={row.result.category.label} />
+              {correctionUi('category', row.result.category.label)}
             </div>
 
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <p className="mb-2 font-mono text-[10px] tracking-widest" style={{ color: DETAIL_FAINT }}>
-                  PRIORITY
-                </p>
+                <SectionLabel
+                  title="PRIORITY"
+                  corrected={row.corrected.priority !== undefined}
+                  onCorrect={canCorrect ? () => startCorrecting('priority') : undefined}
+                  testId="correct-priority"
+                />
                 <PriorityGauge score={row.result.priority.score} bucket={row.result.priority.bucket} />
                 {row.result.priority.note && (
                   <p className="mt-1 text-center font-mono text-[10px]" style={{ color: DETAIL_MUTED }}>
                     {row.result.priority.note}
                   </p>
                 )}
+                {correctionUi('priority', row.result.priority.bucket)}
               </div>
 
               <div>
-                <p className="mb-2 font-mono text-[10px] tracking-widest" style={{ color: DETAIL_FAINT }}>
-                  SPAM CHECK
-                </p>
+                <SectionLabel
+                  title="SPAM CHECK"
+                  corrected={row.corrected.spam !== undefined}
+                  onCorrect={canCorrect ? () => startCorrecting('spam') : undefined}
+                  testId="correct-spam"
+                />
                 <SpamBadge label={row.result.spam.label} confidence={row.result.spam.confidence} />
+                {correctionUi('spam', row.result.spam.label)}
               </div>
             </div>
+
+            {personalizationError && (
+              <p className="font-mono text-[11px]" style={{ color: HIGH }} role="alert">
+                {personalizationError}
+              </p>
+            )}
           </div>
         )}
       </div>
