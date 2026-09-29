@@ -13,10 +13,33 @@ export interface EmailInput {
   precedence?: string
 }
 
+export type PersonalizableModel = 'spam' | 'category' | 'priority'
+export type BackendModelName = PersonalizableModel | 'priority_regressor'
+
+// A user's personalized ONNX graph, as downloaded from the backend.
+export interface PersonalizedModelArtifact {
+  model: BackendModelName
+  version: number
+  classes: (string | number)[]
+  bytes: ArrayBuffer
+}
+
+// What the models actually saw and said, before rounding, spam suppression,
+// or any user correction. Corrections are built from these values, so the
+// backend trains on exactly what production computed.
+export interface ClassificationInputs {
+  spamConf: number
+  vaderCompound: number
+  categoryLabel: string
+  priorityBucket: PriorityBucket
+  priorityConfidences: Record<string, number>
+}
+
 export interface ClassificationResult {
   spam: { label: SpamLabel; confidence: number }
   category: { label: CategoryLabel | string; confidences: Record<string, number> }
   priority: { score: number; bucket: PriorityBucket; note?: string }
+  inputs: ClassificationInputs
 }
 
 // Display shape the inbox UI renders — shared by the hand-authored sample

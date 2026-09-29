@@ -139,6 +139,11 @@ export async function classify(email: EmailInput): Promise<ClassificationResult>
   const priorityClfOut = await requireSession('priority').run(priorityFeeds)
   const priorityRegOut = await requireSession('priorityRegressor').run(priorityFeeds)
   const priorityBucket = (priorityClfOut.label.data as string[])[0] as PriorityBucket
+  const priorityProba = priorityClfOut.probabilities.data as Float32Array
+  const priorityConfidences: Record<string, number> = {}
+  priorityVocab.classes.forEach((cls, i) => {
+    priorityConfidences[cls] = priorityProba[i]
+  })
   // skl2onnx names a bare regressor's sole output "variable" — confirmed
   // against the actual exported graph during the earlier attempt.
   const rawScore = (priorityRegOut.variable.data as Float32Array)[0]
@@ -165,5 +170,12 @@ export async function classify(email: EmailInput): Promise<ClassificationResult>
     spam: { label: spamLabel, confidence: Math.round(spamConf * 10000) / 10000 },
     category: { label: categoryLabel, confidences: categoryConfidences },
     priority,
+    inputs: {
+      spamConf,
+      vaderCompound: compound,
+      categoryLabel,
+      priorityBucket,
+      priorityConfidences,
+    },
   }
 }
