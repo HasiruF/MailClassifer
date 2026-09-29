@@ -1,59 +1,88 @@
-// "Signal Console" shared tokens. Cool navy shell (nav/list/chrome) vs a
-// warm near-black interior for an opened message — closed mail is cool,
-// reading one warms up, like a desk lamp over dark wood at night. (An
-// earlier pass used a literal mid-brown here — read as a muddy paint
-// swatch rather than "warm," not enough contrast headroom for text.
-// Near-black-with-warm-undertone keeps the same cool→warm logic with the
-// contrast of the rest of the app.) Color is functional: sky blue means
-// "medium," burnt orange means "high," nothing else gets a signal color.
-// Type follows the same split (see layout.tsx): IBM Plex Mono for all
-// console chrome (nav, badges, metadata), Newsreader serif only inside an
-// opened message's subject/body — the one place text is read rather than
-// scanned.
-export const INK = '#F5E9D8'
-export const INK_DIM = '#D9CBB0'
-export const MUTED = '#8B93A6'
-export const FAINT = '#565C70'
-export const BORDER = '#242B3D'
-export const BG = '#0D111C'
-export const SIDEBAR_BG = '#0A0D16'
-export const ROW_HOVER = '#161B29'
-export const MEDIUM = '#2FA4D7'
-export const HIGH = '#E76F2E'
-export const SPAM = MUTED
-export const ERROR = '#E76F2E'
+// Flat, light inbox palette built on five brand colors: cerulean #0081A7,
+// tropical teal #00AFB9, light yellow #FDFCDC, soft apricot #FED9B7 and
+// vibrant coral #F07167. No shadows or gradients; structure comes from 1px
+// lines and flat fills.
+//
+// Each color has one job so it keeps a stable meaning across the app:
+// cerulean is actions + Work, teal is Personal + "on/connected", apricot is
+// Other + selection + medium priority, coral is only ever "look at this"
+// (high priority, spam, a rejected retrain). The *_TEXT variants are darker
+// shades of the same hue, because the brand values themselves fall short of
+// 4.5:1 contrast as text or under white text.
+//
+// Type (see app/layout.tsx): Schibsted Grotesk for headings (font-display),
+// Instrument Sans for everything read (font-sans), IBM Plex Mono only for
+// numbers — times, counts and model confidences (font-mono).
 
-// The opened-message page: warm near-black instead of cool navy.
-export const DETAIL_BG = '#171310'
-export const DETAIL_BORDER = '#332A22'
-export const DETAIL_MUTED = '#C4A572'
-export const DETAIL_FAINT = '#6B5D4A'
+export const INK = '#12303A'
+export const MUTED = '#56696F'
+export const FAINT = '#8A979A'
+export const LINE = '#E3E5DA'
+export const LINE_SOFT = '#F0EFE4'
+export const SURFACE = '#FFFFFF'
+export const PANEL_BG = '#F7F7F0'
+// The reading pane: a cool, cerulean-leaning tint, so the open email reads
+// as its own surface next to the white list and the yellow sidebar. The
+// message itself sits on a white card on top of it.
+export const READING_BG = '#F1F6F7'
 
-// Low-priority rows recede — the model already said "don't worry about
-// this one," so the row itself goes gray instead of just its label.
-export const LOW_OPACITY = 0.5
+// Sidebar ground: the palette's light yellow, with lines tuned to sit on it.
+export const SIDEBAR_BG = '#FDFCDC'
+export const SIDEBAR_LINE = '#EBE7C3'
+export const SIDEBAR_FIELD_LINE = '#E3DFB8'
 
-// Category pills — a distinct hue family from priority's sky-blue/orange so
-// the two signals never visually collide (a Work-category chip must never
-// read like a medium-priority one). Kept as desaturated as MEDIUM/HIGH to
-// stay in the same console register rather than turning bright/app-like.
-export const CATEGORY_COLOR: Record<'Work' | 'Personal' | 'Other', string> = {
-  Work: '#6B8CAE', // steel blue
-  Personal: '#7FA66B', // sage
-  Other: '#9B7EBD', // plum
+export const CERULEAN = '#0081A7'
+export const CERULEAN_TEXT = '#00789C'
+export const CERULEAN_DEEP = '#005873'
+export const CERULEAN_TINT = '#DFF0F3'
+
+export const TEAL = '#00AFB9'
+export const TEAL_TEXT = '#005F66'
+export const TEAL_TINT = '#D6F1F2'
+
+export const APRICOT = '#FED9B7'
+export const APRICOT_SWATCH = '#F5B98A'
+export const APRICOT_TEXT = '#8F4F1B'
+export const APRICOT_TINT = '#FEEAD6'
+export const SELECTED_BG = '#FFF1E3'
+
+export const CORAL = '#F07167'
+export const CORAL_TEXT = '#B3372E'
+export const CORAL_TINT = '#FDE4E1'
+
+export const BASE_CATEGORIES = ['Work', 'Personal', 'Other'] as const
+
+// Category swatches. A user's own labels have no swatch color: they render
+// as an outlined square, so the model's categories and yours stay distinct.
+export const CATEGORY_SWATCH: Record<string, string> = {
+  Work: CERULEAN,
+  Personal: TEAL,
+  Other: APRICOT_SWATCH,
 }
 
-// Sender-avatar badge colors — deterministic per sender (see avatarColorFor
-// below) so the same person always gets the same badge across sessions,
-// the way a real client's contact colors would.
-const AVATAR_HUES = ['#6B8CAE', '#7FA66B', '#9B7EBD', '#C08552', '#4F8F8B', '#B08BC9']
+export function isBaseCategory(label: string): boolean {
+  return (BASE_CATEGORIES as readonly string[]).includes(label)
+}
 
-export function avatarColorFor(name: string): string {
+// Keyboard focus, shared by every interactive element in the inbox.
+export const FOCUS_RING = 'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00789C]'
+
+// Sender avatars: [background, text] pairs, picked deterministically per
+// sender (avatarColorsFor) so a person keeps the same color across sessions.
+const AVATAR_COLORS: [string, string][] = [
+  ['#D8EDF3', CERULEAN_DEEP],
+  ['#D4F1F2', TEAL_TEXT],
+  ['#FDE6D2', APRICOT_TEXT],
+  [CORAL_TINT, CORAL_TEXT],
+  ['#F1EFCC', '#5F5A1C'],
+]
+
+export function avatarColorsFor(name: string): [string, string] {
   let hash = 0
   for (let i = 0; i < name.length; i++) {
     hash = (hash * 31 + name.charCodeAt(i)) >>> 0
   }
-  return AVATAR_HUES[hash % AVATAR_HUES.length]
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length]
 }
 
 export function initialsFor(name: string): string {

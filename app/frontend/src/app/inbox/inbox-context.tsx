@@ -52,6 +52,9 @@ interface InboxState {
   toggleRead: (id: string) => void
   selectedId: string | null
   selectEmail: (id: string | null) => void
+  // Phone-width only: whether the sidebar is open as a slide-over menu.
+  navOpen: boolean
+  setNavOpen: (open: boolean) => void
   gmailStatus: GmailStatus
   gmailError: string | null
   connectGmail: (rememberMe: boolean) => void
@@ -122,6 +125,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   // filesystem route could never satisfy generateStaticParams() under
   // output: 'export', which pre-renders every route at build time.
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [navOpen, setNavOpen] = useState(false)
   const [gmailStatus, setGmailStatus] = useState<GmailStatus>('disconnected')
   const [gmailError, setGmailError] = useState<string | null>(null)
   const [personalization, setPersonalization] = useState<PersonalizationStatus | null>(null)
@@ -431,6 +435,8 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         toggleRead,
         selectedId,
         selectEmail: setSelectedId,
+        navOpen,
+        setNavOpen,
         gmailStatus,
         gmailError,
         connectGmail,

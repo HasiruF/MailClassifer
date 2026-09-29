@@ -48,6 +48,9 @@ export interface ClassificationResult {
 // source produced a given row.
 export interface InboxEmail extends EmailInput {
   fromName: string
+  // The message's text/html part, for display only (classification always
+  // uses `body`). Absent for plain-text-only mail and the sample emails.
+  bodyHtml?: string
   receivedAt: string
   receivedAtMs: number
   unread: boolean

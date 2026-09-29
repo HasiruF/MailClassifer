@@ -66,11 +66,11 @@ try {
   for (const id of targets) {
     await page.locator(`[data-email-id="${id}"] button`).first().click()
     await page.getByTestId('correct-category').click()
+    await page.getByTestId(`correction-option-${LABEL}`).click()
     await Promise.all([
       page.waitForResponse((r) => r.url().endsWith('/personalization/corrections') && r.ok()),
-      page.getByTestId(`correction-option-${LABEL}`).click(),
+      page.getByTestId('correction-save').click(),
     ])
-    await page.getByText('← INBOX').click()
   }
   console.log(`Corrected ${targets.length} emails to ${LABEL}.`)
 

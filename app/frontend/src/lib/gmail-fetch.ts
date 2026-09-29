@@ -74,16 +74,18 @@ function collectParts(part: GmailMessagePart, acc: GmailMessagePart[] = []): Gma
   return acc
 }
 
-// Gmail's API hands back the raw MIME tree, not "the" body — prefer the
-// first text/plain part, fall back to text/html (tags stripped) since some
-// senders (marketing mail especially) omit a plain-text alternative.
-function extractBody(payload: GmailMessagePart): string {
+// Gmail's API hands back the raw MIME tree, not "the" body. Two views of it:
+// `text` feeds classification (the first text/plain part, falling back to
+// text/html with tags stripped, since some senders, marketing mail
+// especially, omit a plain-text alternative); `html` is the text/html part
+// as-is, for display only.
+export function extractBodies(payload: GmailMessagePart): { text: string; html: string | undefined } {
   const parts = collectParts(payload)
   const plain = parts.find((p) => p.mimeType === 'text/plain' && p.body?.data)
-  if (plain?.body?.data) return decodeBase64Url(plain.body.data)
-  const html = parts.find((p) => p.mimeType === 'text/html' && p.body?.data)
-  if (html?.body?.data) return stripHtml(decodeBase64Url(html.body.data))
-  return ''
+  const htmlPart = parts.find((p) => p.mimeType === 'text/html' && p.body?.data)
+  const html = htmlPart?.body?.data ? decodeBase64Url(htmlPart.body.data) : undefined
+  const text = plain?.body?.data ? decodeBase64Url(plain.body.data) : html ? stripHtml(html) : ''
+  return { text, html }
 }
 
 function parseFrom(fromHeader: string): { fromName: string; fromAddr: string } {
@@ -113,10 +115,12 @@ function messageToInboxEmail(msg: GmailMessage): InboxEmail {
   const { fromName, fromAddr } = parseFrom(header(headers, 'From'))
   const dateHeader = header(headers, 'Date')
   const parsedMs = Date.parse(dateHeader)
+  const { text, html } = extractBodies(msg.payload)
   return {
     id: msg.id,
     subject: header(headers, 'Subject'),
-    body: extractBody(msg.payload),
+    body: text,
+    bodyHtml: html,
     to: header(headers, 'To'),
     cc: header(headers, 'Cc') || undefined,
     fromAddr,
