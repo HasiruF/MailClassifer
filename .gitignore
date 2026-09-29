@@ -49,3 +49,6 @@ Thumbs.db
 .vscode/
 .idea/
 app/frontend/.diag/
+
+# Personalization base training matrices (scripts/export_training_matrices.py)
+app/backend/training_data/
