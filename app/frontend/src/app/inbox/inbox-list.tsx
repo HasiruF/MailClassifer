@@ -61,6 +61,9 @@ function EmailRow({ row }: { row: Row }) {
 
   return (
     <li
+      data-testid="email-row"
+      data-email-id={row.id}
+      data-category={row.result?.category.label ?? ''}
       style={{
         borderTop: `1px solid ${BORDER}`,
         opacity: !showArchived && row.result?.priority.bucket === 'low' ? LOW_OPACITY : 1,
