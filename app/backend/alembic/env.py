@@ -12,6 +12,7 @@ from src.models import (  # noqa: F401
     Correction,
     EmailConnection,
     InteractionEvent,
+    PersonalizedModel,
     Session,
     User,
 )
