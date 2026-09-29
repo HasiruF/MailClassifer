@@ -667,13 +667,46 @@ is a credential, not email content. Keep this separate from the
 personalization/corrections backend work (§5.3) — different concern, same
 Phase 2 backend. Do not default to storing a refresh token client-side.
 
+### Personalization (corrections + per-user retraining) — built
+
+Spec: `docs/superpowers/specs/2026-09-29-personalization-design.md`.
+Plan: `docs/superpowers/plans/2026-09-29-personalization.md`.
+
+- Opt-in per user. When on, correcting a label in the email detail view
+  sends the email's **sparse feature vector** (never the text) to the
+  backend. Custom labels are allowed for category only.
+- After 5 new corrections for a model (or "retrain now"), the backend
+  refits a `clone()` of the production classifier head on the base rows plus
+  the corrections (weight 10). It keeps the TF-IDF vocabulary fixed, so
+  nothing on the client's feature side changes. Priority retrains its
+  classifier and regressor together.
+- A validation gate runs before a new version goes active: at least 80% of
+  the user's own corrections predicted as corrected, at most a 3-point drop
+  on the adversarial set, and at most 10% of that set pulled into custom
+  labels. Otherwise the attempt is stored as `rejected` with the reason.
+- Versions live in `personalized_models`. The client loads the user's
+  active ONNX graphs in place of the base ones and still classifies in the
+  browser.
+- **Privacy caveat (stated honestly, including in the opt-in prompt):** a
+  TF-IDF vector plus the public `vocab.json` reveals which vocabulary words
+  appeared (a bag of words), though not the text or word order.
+- Regenerate the base matrices whenever the base models retrain:
+  `python scripts/export_training_matrices.py` (it refuses to write unless a
+  zero-correction refit reproduces each production model).
+- Measure for the report:
+  `app/backend: .venv\Scripts\python.exe -m src.personalization.measure --user-id <uuid> --model category`
+  trains on half of that user's corrections and reports held-out accuracy
+  before/after for several weights, plus gate-set accuracy.
+- Checks: backend `npm run test:be`; client/sklearn vector parity
+  `npx tsx scripts/sparse_parity_check.mjs`; end to end
+  `node scripts/personalization_e2e.mjs <session id>` (both from
+  `app/frontend`).
+
 ### Not started
 
-- **Phase 2 (backend)** — no `app/backend/` exists yet (`.gitignore` already
-  has a placeholder entry for `app/backend/pgdata/`, but there's no FastAPI
-  project, no Postgres schema). Personalization, correction sync, custom
-  categories, and the Gmail-auth token-holder above are all still just
-  design-doc sections or the guidance logged above — not code.
+- **Phase 2 (backend), remaining:** the analytics dashboard backend. The
+  FastAPI + Postgres backend itself, the Gmail token-holder, and
+  personalization (section above) are built.
 - Committing the Gmail integration work, and reconciling both it and the
   inbox UI with a written spec/plan (both were built ahead of any doc for
   them — worth writing one retroactively, or before extending either
