@@ -3,9 +3,8 @@
 import { useState } from 'react'
 import { useInbox } from './inbox-context'
 import { BORDER, FAINT, HIGH, INK, MUTED, SIDEBAR_BG } from './tokens'
-import type { CategoryLabel } from '@/types'
 
-const CATEGORIES: CategoryLabel[] = ['Work', 'Personal', 'Other']
+const CATEGORIES = ['Work', 'Personal', 'Other']
 
 function NavRow({
   active,
@@ -57,12 +56,36 @@ export function Sidebar() {
     gmailError,
     connectGmail,
     refreshInbox,
+    personalization,
+    personalizationError,
+    retraining,
+    retrainPersonalization,
+    disablePersonalization,
   } = useInbox()
+  const categories = [...CATEGORIES, ...(personalization?.custom_labels ?? [])]
 
   const [rememberMe, setRememberMe] = useState(true)
 
+  const models = personalization?.models ?? []
+  const totalCorrections = models.reduce((n, m) => n + m.correction_count, 0)
+  const nextRetrainIn = models.length ? Math.min(...models.map((m) => m.corrections_until_retrain)) : 5
+  const lastAttempt = models
+    .filter((m) => m.last_attempt)
+    .sort((a, b) => (a.last_attempt!.created_at < b.last_attempt!.created_at ? 1 : -1))[0]
+  const lastAttemptText = lastAttempt?.last_attempt
+    ? lastAttempt.last_attempt.status === 'rejected'
+      ? `LAST RETRAIN REJECTED: ${lastAttempt.last_attempt.metrics.reason ?? lastAttempt.last_attempt.metrics.error ?? 'unknown reason'}`
+      : `LAST RETRAIN: ${lastAttempt.model.toUpperCase()} V${lastAttempt.last_attempt.version}`
+    : null
+
+  function turnOffPersonalization() {
+    if (window.confirm('Turning off personalization deletes your corrections and personalized models. Continue?')) {
+      void disablePersonalization()
+    }
+  }
+
   const live = (r: (typeof rows)[number]) => !archivedIds.has(r.id)
-  const countFor = (cat: CategoryLabel | 'All') => {
+  const countFor = (cat: string) => {
     if (status === 'loading') return '·'
     if (cat === 'All') return String(rows.filter(live).length)
     return String(rows.filter(live).filter((r) => r.result?.category.label === cat).length)
@@ -77,7 +100,7 @@ export function Sidebar() {
     setShowArchived(false)
     selectEmail(null)
   }
-  function goToCategory(c: CategoryLabel) {
+  function goToCategory(c: string) {
     setFilter(c)
     setOnlyHigh(false)
     setShowArchived(false)
@@ -130,7 +153,7 @@ export function Sidebar() {
           count={countFor('All')}
           onClick={goToAll}
         />
-        {CATEGORIES.map((c) => (
+        {categories.map((c) => (
           <NavRow
             key={c}
             active={inList && !showArchived && filter === c && !onlyHigh}
@@ -200,6 +223,37 @@ export function Sidebar() {
           </label>
         )}
       </div>
+
+      {gmailStatus === 'connected' && personalization?.enabled && (
+        <div
+          className="flex flex-col gap-1 px-1 font-mono text-[10px] tracking-wide"
+          style={{ color: FAINT }}
+          data-testid="personalization-status"
+        >
+          <span>
+            {totalCorrections} CORRECTIONS · {retraining ? 'RETRAINING…' : `RETRAIN IN ${nextRetrainIn}`}
+          </span>
+          {lastAttemptText && (
+            <span style={{ color: lastAttempt?.last_attempt?.status === 'rejected' ? HIGH : MUTED }}>{lastAttemptText}</span>
+          )}
+          {personalizationError && <span style={{ color: HIGH }}>{personalizationError}</span>}
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => void retrainPersonalization()}
+              disabled={retraining || totalCorrections === 0}
+              data-testid="retrain-now"
+              className="disabled:opacity-40"
+              style={{ color: MUTED }}
+            >
+              ↻ RETRAIN NOW
+            </button>
+            <button type="button" onClick={turnOffPersonalization} style={{ color: FAINT }}>
+              TURN OFF
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-auto px-1 font-mono text-[10px] tracking-wide" style={{ color: FAINT }}>
         {status === 'loading' && 'MODEL LOADING…'}
