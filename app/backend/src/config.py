@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     google_client_secret: str
     google_redirect_uri: str
     frontend_url: str
+    training_data_dir: str = "training_data"
 
     @property
     def database_url(self) -> str:
