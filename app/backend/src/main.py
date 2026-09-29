@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from src.config import settings
 from src.database import get_db
 from src.routers.auth import router as auth_router
+from src.routers.personalization import router as personalization_router
 
 app = FastAPI(title="Email Classifier Backend")
 
@@ -18,6 +19,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(personalization_router)
 
 
 @app.get("/health")
