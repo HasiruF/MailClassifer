@@ -14,14 +14,22 @@ import { applyCorrections, predictedFor } from '@/lib/corrections'
 import {
   fetchActiveModels,
   getStatus,
+  listCorrections,
   retrainNow,
   setEnabled,
   submitCorrection,
   type CorrectionResponse,
   type PersonalizationStatus,
 } from '@/lib/personalization-api'
+import { resortedCategories } from '@/lib/resort'
 import { toSparse } from '@/lib/sparse'
-import type { ClassificationResult, InboxEmail, PersonalizableModel, PersonalizedModelArtifact } from '@/types'
+import type {
+  BackendModelName,
+  ClassificationResult,
+  InboxEmail,
+  PersonalizableModel,
+  PersonalizedModelArtifact,
+} from '@/types'
 import { SAMPLE_EMAILS } from '@/data/sample-emails'
 
 export type Row = InboxEmail & {
@@ -33,6 +41,9 @@ export type Row = InboxEmail & {
   corrected: Partial<Record<PersonalizableModel, string>>
 }
 export type GmailStatus = 'disconnected' | 'connecting' | 'fetching' | 'connected' | 'error'
+// Emails a newly loaded personal model moved to another category, mapped to
+// the category they had before. `version` is the new category model version.
+export type Resorted = { version: number | null; from: Record<string, string> }
 
 interface InboxState {
   rows: Row[]
@@ -62,6 +73,11 @@ interface InboxState {
   personalization: PersonalizationStatus | null
   personalizationError: string | null
   retraining: boolean
+  activeVersions: Partial<Record<BackendModelName, number>>
+  resorted: Resorted | null
+  showResortedOnly: boolean
+  setShowResortedOnly: (v: boolean) => void
+  dismissResorted: () => void
   correctEmail: (id: string, model: PersonalizableModel, label: string) => Promise<void>
   enablePersonalization: () => Promise<boolean>
   disablePersonalization: () => Promise<void>
@@ -131,12 +147,16 @@ export function InboxProvider({ children }: { children: ReactNode }) {
   const [personalization, setPersonalization] = useState<PersonalizationStatus | null>(null)
   const [personalizationError, setPersonalizationError] = useState<string | null>(null)
   const [retraining, setRetraining] = useState(false)
+  const [activeVersions, setActiveVersions] = useState<Partial<Record<BackendModelName, number>>>({})
+  const [resorted, setResorted] = useState<Resorted | null>(null)
+  const [showResortedOnly, setShowResortedOnly] = useState(false)
 
   // Async flows below outlive the render they started in; refs let them
   // read current state instead of a stale closure.
   const rowsRef = useRef<Row[]>(rows)
   const personalizationRef = useRef<PersonalizationStatus | null>(null)
   const appliedVersions = useRef('')
+  const activeVersionsRef = useRef<Partial<Record<BackendModelName, number>>>({})
 
   useEffect(() => {
     rowsRef.current = rows
@@ -174,6 +194,9 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       if (key === appliedVersions.current) return false
       await applyPersonalizedModels(artifacts)
       appliedVersions.current = key
+      const versions = Object.fromEntries(artifacts.map((a) => [a.model, a.version]))
+      activeVersionsRef.current = versions
+      setActiveVersions(versions)
       return true
     } catch (err) {
       setPersonalizationError(`Personalization unavailable, using base models: ${message(err)}`)
@@ -181,11 +204,34 @@ export function InboxProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function reclassify(): Promise<void> {
+  async function reclassify(): Promise<Map<string, ClassificationResult>> {
+    const results = new Map<string, ClassificationResult>()
     for (const row of rowsRef.current) {
       if (!row.modelResult) continue
       const result = await classify(row)
+      results.set(row.id, result)
       setRows((prev) => prev.map((r) => (r.id === row.id ? withResult(r, result) : r)))
+    }
+    return results
+  }
+
+  function dismissResorted() {
+    setResorted(null)
+    setShowResortedOnly(false)
+  }
+
+  // Saved corrections by email, so they still show after a reload. Never
+  // throws: without them the inbox just shows the model's labels.
+  async function savedCorrections(): Promise<Record<string, Row['corrected']>> {
+    if (!personalizationRef.current?.enabled) return {}
+    try {
+      const byEmail: Record<string, Row['corrected']> = {}
+      for (const c of await listCorrections()) {
+        byEmail[c.provider_message_id] = { ...byEmail[c.provider_message_id], [c.model]: c.corrected_label }
+      }
+      return byEmail
+    } catch {
+      return {}
     }
   }
 
@@ -198,7 +244,8 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       if (!modelsLoaded()) throw new Error('models did not finish loading')
       await syncPersonalization()
 
-      setRows(emails.map(emptyRow))
+      const saved = await savedCorrections()
+      setRows(emails.map((email) => ({ ...emptyRow(email), corrected: saved[email.id] ?? {} })))
       // Same WASM single-flight constraint as the sample-email loop below —
       // classify() calls go one at a time, not Promise.all.
       for (const email of emails) {
@@ -268,7 +315,13 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         updatePersonalization(next)
         if (!next.models.some((m) => m.running) && attemptKey(next) !== before) break
       }
-      if (await syncPersonalization()) await reclassify()
+      const previous = new Map(rowsRef.current.flatMap((r) => (r.modelResult ? [[r.id, r.modelResult] as const] : [])))
+      const corrected = new Set(rowsRef.current.filter((r) => r.corrected.category !== undefined).map((r) => r.id))
+      if (await syncPersonalization()) {
+        const from = resortedCategories(previous, await reclassify(), corrected)
+        setShowResortedOnly(false)
+        setResorted(Object.keys(from).length > 0 ? { version: activeVersionsRef.current.category ?? null, from } : null)
+      }
     } catch (err) {
       setPersonalizationError(message(err))
     } finally {
@@ -329,6 +382,7 @@ export function InboxProvider({ children }: { children: ReactNode }) {
       return
     }
     setRows((prev) => prev.map((r) => ({ ...r, corrected: {}, result: r.modelResult })))
+    dismissResorted()
     if (await syncPersonalization()) await reclassify()
   }
 
@@ -444,6 +498,11 @@ export function InboxProvider({ children }: { children: ReactNode }) {
         personalization,
         personalizationError,
         retraining,
+        activeVersions,
+        resorted,
+        showResortedOnly,
+        setShowResortedOnly,
+        dismissResorted,
         correctEmail,
         enablePersonalization,
         disablePersonalization,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Archive, ArchiveRestore, Mail, MailOpen, Menu } from 'lucide-react'
+import { Archive, ArchiveRestore, Mail, MailOpen, Menu, RotateCcw, X } from 'lucide-react'
 import type { PriorityBucket } from '@/types'
 import { withShortLinks } from '@/lib/links'
 import { useInbox, type Row } from './inbox-context'
@@ -26,6 +26,8 @@ import {
   SIDEBAR_FIELD_LINE,
   SIDEBAR_LINE,
   SURFACE,
+  TEAL_TEXT,
+  TEAL_TINT,
 } from './tokens'
 
 // sm: the compact tags on list rows; md: everywhere else.
@@ -77,6 +79,55 @@ export function SpamChip({ size = 'md' }: { size?: ChipSize }) {
   )
 }
 
+function ResortedTag({ from }: { from: string }) {
+  return (
+    <span
+      className={`${CHIP_SIZE.sm} shrink-0 font-semibold`}
+      style={{ background: TEAL_TINT, color: TEAL_TEXT }}
+      title={`Your model moved this from ${from}`}
+    >
+      <RotateCcw size={11} strokeWidth={2.5} aria-hidden />
+      was {from}
+    </span>
+  )
+}
+
+function ResortedBanner() {
+  const { resorted, showResortedOnly, setShowResortedOnly, dismissResorted } = useInbox()
+  if (!resorted) return null
+  const count = Object.keys(resorted.from).length
+  const who = resorted.version ? `Your model (version ${resorted.version})` : 'Your model'
+  return (
+    <div
+      role="status"
+      data-testid="resorted-banner"
+      className="mx-4 mt-3 flex items-center gap-2.5 rounded-lg py-1.5 pr-1.5 pl-3 md:mx-5"
+      style={{ background: TEAL_TINT, color: TEAL_TEXT }}
+    >
+      <RotateCcw size={16} strokeWidth={2} className="shrink-0" aria-hidden />
+      <span className="min-w-0 flex-1 text-[13px] font-medium" style={{ color: INK }}>
+        {who} re-sorted {count} {count === 1 ? 'email' : 'emails'}.
+      </span>
+      <button
+        type="button"
+        aria-pressed={showResortedOnly}
+        onClick={() => setShowResortedOnly(!showResortedOnly)}
+        className={`h-8 shrink-0 rounded-md px-2 text-[13px] font-semibold hover:bg-[#C4EAEC] ${FOCUS_RING}`}
+      >
+        {showResortedOnly ? 'Show all' : 'Show only these'}
+      </button>
+      <button
+        type="button"
+        aria-label="Dismiss"
+        onClick={dismissResorted}
+        className={`flex size-8 shrink-0 items-center justify-center rounded-md hover:bg-[#C4EAEC] ${FOCUS_RING}`}
+      >
+        <X size={14} strokeWidth={2} aria-hidden />
+      </button>
+    </div>
+  )
+}
+
 function matchesQuery(row: Row, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
@@ -98,8 +149,9 @@ function bucketFor(ms: number): 'Today' | 'Yesterday' | 'Earlier' {
 }
 
 function EmailRow({ row }: { row: Row }) {
-  const { selectedId, selectEmail, showArchived, toggleRead, archiveEmail, unarchiveEmail } = useInbox()
+  const { selectedId, selectEmail, showArchived, toggleRead, archiveEmail, unarchiveEmail, resorted } = useInbox()
   const selected = row.id === selectedId
+  const wasCategory = resorted?.from[row.id]
   const isSpam = row.result?.spam.label === 'spam'
   // Spam recedes: the model already set it aside, so it shouldn't compete
   // with real mail for attention.
@@ -134,6 +186,7 @@ function EmailRow({ row }: { row: Row }) {
               <>
                 {isSpam && <SpamChip size="sm" />}
                 <CategoryChip label={row.result.category.label} size="sm" />
+                {wasCategory && <ResortedTag from={wasCategory} />}
                 {!isSpam && <PriorityChip bucket={row.result.priority.bucket} size="sm" />}
               </>
             ) : (
@@ -201,7 +254,17 @@ function DateSection({ label, rows }: { label: string; rows: Row[] }) {
 // Phone-width replacement for the sidebar's category list: the sidebar is a
 // slide-over menu there, so the everyday filters stay one tap away.
 function FilterChips() {
-  const { filter, setFilter, onlyHigh, setOnlyHigh, showArchived, setShowArchived, personalization } = useInbox()
+  const {
+    filter,
+    setFilter,
+    onlyHigh,
+    setOnlyHigh,
+    showArchived,
+    setShowArchived,
+    showResortedOnly,
+    setShowResortedOnly,
+    personalization,
+  } = useInbox()
   const options = ['All', ...BASE_CATEGORIES, ...(personalization?.custom_labels ?? [])]
   return (
     <nav
@@ -210,7 +273,7 @@ function FilterChips() {
       style={{ background: SIDEBAR_BG, borderBottom: `1px solid ${SIDEBAR_LINE}` }}
     >
       {options.map((option) => {
-        const active = !showArchived && !onlyHigh && filter === option
+        const active = !showArchived && !onlyHigh && !showResortedOnly && filter === option
         return (
           <button
             key={option}
@@ -220,6 +283,7 @@ function FilterChips() {
               setFilter(option)
               setOnlyHigh(false)
               setShowArchived(false)
+              setShowResortedOnly(false)
             }}
             className={`flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-sm ${FOCUS_RING} ${
               active ? 'font-semibold text-white' : 'font-medium'
@@ -245,13 +309,26 @@ function FilterChips() {
 }
 
 export function InboxList() {
-  const { rows, status, error, filter, onlyHigh, showArchived, query, archivedIds, setNavOpen } = useInbox()
+  const {
+    rows,
+    status,
+    error,
+    filter,
+    onlyHigh,
+    showArchived,
+    query,
+    archivedIds,
+    setNavOpen,
+    resorted,
+    showResortedOnly,
+  } = useInbox()
   const [unreadOnly, setUnreadOnly] = useState(false)
 
   const scoped = rows.filter((r) => archivedIds.has(r.id) === showArchived)
   const visibleRows = scoped
-    .filter((r) => showArchived || filter === 'All' || r.result?.category.label === filter)
-    .filter((r) => showArchived || !onlyHigh || r.result?.priority.bucket === 'high')
+    .filter((r) => !showResortedOnly || resorted?.from[r.id] !== undefined)
+    .filter((r) => showArchived || showResortedOnly || filter === 'All' || r.result?.category.label === filter)
+    .filter((r) => showArchived || showResortedOnly || !onlyHigh || r.result?.priority.bucket === 'high')
     .filter((r) => matchesQuery(r, query))
     .sort((a, b) => b.receivedAtMs - a.receivedAtMs)
   const shownRows = unreadOnly ? visibleRows.filter((r) => r.unread) : visibleRows
@@ -261,7 +338,15 @@ export function InboxList() {
   const yesterday = shownRows.filter((r) => bucketFor(r.receivedAtMs) === 'Yesterday')
   const earlier = shownRows.filter((r) => bucketFor(r.receivedAtMs) === 'Earlier')
 
-  const title = showArchived ? 'Archived' : onlyHigh ? 'High priority' : filter === 'All' ? 'All mail' : filter
+  const title = showArchived
+    ? 'Archived'
+    : showResortedOnly
+      ? 'Re-sorted by your model'
+      : onlyHigh
+        ? 'High priority'
+        : filter === 'All'
+          ? 'All mail'
+          : filter
   const trimmedQuery = query.trim()
   const emptyMessage = trimmedQuery
     ? `No mail matches “${trimmedQuery}”.`
@@ -306,6 +391,7 @@ export function InboxList() {
         </button>
       </header>
       <FilterChips />
+      <ResortedBanner />
 
       {status === 'error' && (
         <p className="mx-4 mt-3 rounded-lg px-3 py-2.5 text-[13px] leading-relaxed md:mx-5" style={{ background: CORAL_TINT, color: CORAL_TEXT }} role="alert">

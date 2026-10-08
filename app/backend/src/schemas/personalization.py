@@ -46,7 +46,24 @@ class SettingsOut(BaseModel):
 class LastAttempt(BaseModel):
     version: int
     status: str
+    correction_count: int
     metrics: dict
+    created_at: datetime
+
+
+class CorrectionSummary(BaseModel):
+    provider_message_id: str
+    model: str
+    corrected_label: str
+
+
+class CorrectionDetail(BaseModel):
+    model: str
+    provider_message_id: str
+    predicted_label: str
+    predicted_confidence: float
+    corrected_label: str
+    feature_vector: SparseVector
     created_at: datetime
 
 

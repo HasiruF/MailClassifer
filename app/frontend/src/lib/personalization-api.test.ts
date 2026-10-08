@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { submitCorrection, type CorrectionPayload } from './personalization-api'
+import { getCorrectionDetail, submitCorrection, type CorrectionPayload } from './personalization-api'
 
 const payload: CorrectionPayload = {
   model: 'category',
@@ -33,5 +33,20 @@ describe('submitCorrection', () => {
   it('throws with the status code when the backend refuses', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 403 })))
     await expect(submitCorrection(payload)).rejects.toThrow('403')
+  })
+})
+
+describe('getCorrectionDetail', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('asks for one message, encoded, with credentials', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('[]', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(getCorrectionDetail('a/b')).resolves.toEqual([])
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:3011/personalization/corrections/a%2Fb')
+    expect(init.credentials).toBe('include')
   })
 })

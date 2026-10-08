@@ -6,6 +6,7 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:301
 export interface LastAttempt {
   version: number
   status: 'active' | 'rejected' | 'superseded'
+  correction_count: number
   metrics: { reason?: string | null; error?: string; passed?: boolean; [key: string]: unknown }
   created_at: string
 }
@@ -65,6 +66,30 @@ export function setEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
 
 export function submitCorrection(payload: CorrectionPayload): Promise<CorrectionResponse> {
   return json('/personalization/corrections', { method: 'POST', body: JSON.stringify(payload) })
+}
+
+export interface CorrectionSummary {
+  provider_message_id: string
+  model: PersonalizableModel
+  corrected_label: string
+}
+
+export interface CorrectionDetail {
+  model: PersonalizableModel
+  provider_message_id: string
+  predicted_label: string
+  predicted_confidence: number
+  corrected_label: string
+  feature_vector: SparseVector
+  created_at: string
+}
+
+export function listCorrections(): Promise<CorrectionSummary[]> {
+  return json('/personalization/corrections')
+}
+
+export function getCorrectionDetail(messageId: string): Promise<CorrectionDetail[]> {
+  return json(`/personalization/corrections/${encodeURIComponent(messageId)}`)
 }
 
 export function retrainNow(): Promise<{ scheduled: string[] }> {

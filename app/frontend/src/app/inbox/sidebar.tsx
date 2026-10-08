@@ -2,6 +2,9 @@
 
 import { useState, type ReactNode } from 'react'
 import { Archive, Check, Cpu, Flag, Inbox, RefreshCw, Search, X } from 'lucide-react'
+import type { LastAttempt } from '@/lib/personalization-api'
+import { reportChecks, type ReportCheck } from '@/lib/retrain-report'
+import type { PersonalizableModel } from '@/types'
 import { useInbox } from './inbox-context'
 import {
   BASE_CATEGORIES,
@@ -77,6 +80,112 @@ function GroupLabel({ children, spaced = false }: { children: ReactNode; spaced?
   )
 }
 
+function ReportCheckRow({ check }: { check: ReportCheck }) {
+  const failed = !check.passed
+  return (
+    <li className="flex flex-col gap-1">
+      <div className="flex items-start justify-between gap-2">
+        <span
+          className={`flex min-w-0 items-start gap-1.5 text-[13px] leading-snug ${failed ? 'font-semibold' : 'font-medium'}`}
+          style={{ color: failed ? CORAL_TEXT : INK }}
+        >
+          {failed ? (
+            <X size={13} strokeWidth={2.5} className="mt-[3px] shrink-0" aria-hidden />
+          ) : (
+            <Check size={13} strokeWidth={2.5} className="mt-[3px] shrink-0" style={{ color: TEAL_TEXT }} aria-hidden />
+          )}
+          <span className="sr-only">{failed ? 'Failed:' : 'Passed:'}</span>
+          {check.label}
+        </span>
+        <span
+          className="shrink-0 pt-px font-mono text-xs font-medium whitespace-nowrap"
+          style={{ color: failed ? CORAL_TEXT : INK }}
+        >
+          {check.value}
+        </span>
+      </div>
+      {check.bar && (
+        <span className="relative h-1.5 rounded-full" style={{ background: '#EBE8CC' }} aria-hidden>
+          <span
+            className="absolute inset-y-0 left-0 rounded-full"
+            style={{ width: `${Math.min(1, check.bar.fill) * 100}%`, background: failed ? CORAL : CERULEAN }}
+          />
+          <span className="absolute -inset-y-[3px] w-0.5" style={{ left: `${check.bar.mark * 100}%`, background: INK }} />
+        </span>
+      )}
+      <span className="text-[11px] leading-snug" style={{ color: MUTED }}>
+        {check.caption}
+      </span>
+    </li>
+  )
+}
+
+// The latest retrain attempt, explained as the three checks the backend ran
+// before deciding whether to use the new model.
+function RetrainReportCard({
+  model,
+  attempt,
+  activeVersion,
+  resortedCount,
+  onShowResorted,
+}: {
+  model: PersonalizableModel
+  attempt: LastAttempt
+  activeVersion: number | undefined
+  resortedCount: number
+  onShowResorted: () => void
+}) {
+  const checks = reportChecks(model, attempt)
+  const rejected = attempt.status === 'rejected'
+  const name = model[0].toUpperCase() + model.slice(1)
+  return (
+    <div className="flex flex-col gap-2.5 border-t pt-2.5" style={{ borderColor: '#EFEDD6' }}>
+      {rejected ? (
+        <div className="flex flex-col gap-1">
+          <span className="text-[13px] font-semibold" style={{ color: CORAL_TEXT }}>
+            {name} version {attempt.version} not applied
+          </span>
+          <span className="text-xs leading-relaxed" style={{ color: '#3D5359' }}>
+            {checks ? '' : `${attempt.metrics.reason ?? attempt.metrics.error ?? 'Reason not recorded.'} `}
+            {activeVersion
+              ? `Version ${activeVersion} is still sorting your inbox.`
+              : 'The standard model is still sorting your inbox.'}
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <span className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: TEAL_TEXT }}>
+            <Check size={15} strokeWidth={2.25} aria-hidden />
+            {name} model updated
+          </span>
+          <span className="text-xs leading-relaxed" style={{ color: MUTED }}>
+            {checks
+              ? `Version ${attempt.version} passed all ${checks.length} checks and is sorting your inbox.`
+              : `Version ${attempt.version} is now sorting your inbox.`}
+          </span>
+        </div>
+      )}
+      {checks && (
+        <ul className="flex flex-col gap-2.5" data-testid="retrain-checks">
+          {checks.map((check) => (
+            <ReportCheckRow key={check.label} check={check} />
+          ))}
+        </ul>
+      )}
+      {!rejected && resortedCount > 0 && (
+        <button
+          type="button"
+          onClick={onShowResorted}
+          className={`self-start rounded-sm text-[13px] font-semibold hover:underline ${FOCUS_RING}`}
+          style={{ color: CERULEAN_TEXT }}
+        >
+          See the {resortedCount} {resortedCount === 1 ? 'email' : 'emails'} it re-sorted
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function Sidebar() {
   const {
     rows,
@@ -102,6 +211,10 @@ export function Sidebar() {
     disablePersonalization,
     navOpen,
     setNavOpen,
+    activeVersions,
+    resorted,
+    showResortedOnly,
+    setShowResortedOnly,
   } = useInbox()
   const customLabels = personalization?.custom_labels ?? []
 
@@ -135,10 +248,11 @@ export function Sidebar() {
     setFilter(next.filter ?? 'All')
     setOnlyHigh(next.onlyHigh ?? false)
     setShowArchived(next.archived ?? false)
+    setShowResortedOnly(false)
     selectEmail(null)
     setNavOpen(false)
   }
-  const inMailbox = !showArchived && !onlyHigh
+  const inMailbox = !showArchived && !onlyHigh && !showResortedOnly
 
   return (
     <>
@@ -157,7 +271,9 @@ export function Sidebar() {
       <aside
         aria-label="Mailboxes"
         className={`${
-          navOpen ? 'fixed inset-y-0 left-0 z-40 flex w-[280px]' : 'hidden md:flex md:w-[248px]'
+          // relative: absolutely positioned children (e.g. sr-only labels)
+          // must be clipped by this scroll area, not stretch the page.
+          navOpen ? 'fixed inset-y-0 left-0 z-40 flex w-[280px]' : 'hidden md:relative md:flex md:w-[248px]'
         } shrink-0 flex-col gap-5 overflow-y-auto px-3.5 pt-5 pb-4 [&>*]:shrink-0`}
         style={{ background: SIDEBAR_BG, borderRight: `1px solid ${SIDEBAR_LINE}` }}
       >
@@ -292,29 +408,16 @@ export function Sidebar() {
               )}
 
               {!retraining && lastAttempt?.last_attempt && (
-                <div className="flex flex-col gap-1 border-t pt-2.5" style={{ borderColor: '#EFEDD6' }}>
-                  {lastRejected ? (
-                    <>
-                      <span className="text-[13px] font-semibold" style={{ color: CORAL_TEXT }}>
-                        Last retrain not applied
-                      </span>
-                      <span className="text-xs leading-relaxed" style={{ color: '#3D5359' }}>
-                        {lastAttempt.last_attempt.metrics.reason ?? lastAttempt.last_attempt.metrics.error ?? 'Reason not recorded.'}{' '}
-                        Your current model is still in use.
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: TEAL_TEXT }}>
-                        <Check size={15} strokeWidth={2.25} aria-hidden />
-                        {lastAttempt.model[0].toUpperCase() + lastAttempt.model.slice(1)} model updated
-                      </span>
-                      <span className="text-xs" style={{ color: MUTED }}>
-                        Version {lastAttempt.last_attempt.version} is now sorting your inbox.
-                      </span>
-                    </>
-                  )}
-                </div>
+                <RetrainReportCard
+                  model={lastAttempt.model}
+                  attempt={lastAttempt.last_attempt}
+                  activeVersion={activeVersions[lastAttempt.model]}
+                  resortedCount={resorted ? Object.keys(resorted.from).length : 0}
+                  onShowResorted={() => {
+                    go({})
+                    setShowResortedOnly(true)
+                  }}
+                />
               )}
 
               {personalizationError && (
