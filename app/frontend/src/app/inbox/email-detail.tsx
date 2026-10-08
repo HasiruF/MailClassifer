@@ -12,6 +12,7 @@ import {
   Mail,
   MailOpen,
   MousePointerClick,
+  RotateCcw,
 } from 'lucide-react'
 import type { PersonalizableModel, PriorityBucket, SpamLabel } from '@/types'
 import { predictedFor } from '@/lib/corrections'
@@ -21,6 +22,7 @@ import { Avatar } from './avatar'
 import { CategoryChip, PriorityChip, SpamChip } from './inbox-list'
 import { EmailHtmlBody } from './email-html-body'
 import { CorrectionPicker, OptInPrompt, type CorrectionOption } from './correction-picker'
+import { CorrectionReceipt } from './correction-receipt'
 import {
   APRICOT_SWATCH,
   APRICOT_TEXT,
@@ -107,6 +109,8 @@ function VerdictCell({
   corrected,
   onCorrect,
   correcting,
+  onShowSent,
+  showingSent,
   testId,
   children,
 }: {
@@ -114,6 +118,8 @@ function VerdictCell({
   corrected: boolean
   onCorrect?: () => void
   correcting: boolean
+  onShowSent?: () => void
+  showingSent: boolean
   testId: string
   children: ReactNode
 }) {
@@ -133,27 +139,43 @@ function VerdictCell({
         )}
       </div>
       {children}
-      {onCorrect && (
-        <button
-          type="button"
-          onClick={onCorrect}
-          aria-expanded={correcting}
-          data-testid={testId}
-          className={`mt-auto h-8 self-start rounded-[7px] border px-3 text-[13px] font-medium transition-colors ${FOCUS_RING} ${
-            correcting ? '' : 'hover:bg-[#F6F7F2]'
-          }`}
-          style={
-            correcting
-              ? {
-                  borderColor: '#00789C',
-                  background: '#EEF7F9',
-                  color: '#005873',
-                }
-              : { borderColor: '#CFD6D2', background: SURFACE, color: INK }
-          }
-        >
-          Correct
-        </button>
+      {(onCorrect || onShowSent) && (
+        <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+          {onCorrect && (
+            <button
+              type="button"
+              onClick={onCorrect}
+              aria-expanded={correcting}
+              data-testid={testId}
+              className={`h-8 rounded-[7px] border px-3 text-[13px] font-medium transition-colors ${FOCUS_RING} ${
+                correcting ? '' : 'hover:bg-[#F6F7F2]'
+              }`}
+              style={
+                correcting
+                  ? {
+                      borderColor: '#00789C',
+                      background: '#EEF7F9',
+                      color: '#005873',
+                    }
+                  : { borderColor: '#CFD6D2', background: SURFACE, color: INK }
+              }
+            >
+              Correct
+            </button>
+          )}
+          {onShowSent && (
+            <button
+              type="button"
+              onClick={onShowSent}
+              aria-expanded={showingSent}
+              data-testid={`${testId}-sent`}
+              className={`h-8 rounded-sm text-[13px] font-medium hover:underline ${FOCUS_RING}`}
+              style={{ color: CERULEAN_TEXT }}
+            >
+              What was sent?
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
@@ -326,8 +348,11 @@ export function EmailDetail({ id }: { id: string }) {
     personalizationError,
     correctEmail,
     enablePersonalization,
+    activeVersions,
+    resorted,
   } = useInbox()
   const [picking, setPicking] = useState<PersonalizableModel | null>(null)
+  const [receiptFor, setReceiptFor] = useState<{ id: string; model: PersonalizableModel } | null>(null)
   const [optInFor, setOptInFor] = useState<PersonalizableModel | null>(null)
   const [enabling, setEnabling] = useState(false)
   const [sortedOpen, setSortedOpen] = useState(readSortedOpen)
@@ -367,8 +392,20 @@ export function EmailDetail({ id }: { id: string }) {
   // hand-authored sample emails can't be corrected.
   const canCorrect = row.source === 'gmail' && row.modelResult !== null
   const active = optInFor ?? picking
+  const showingReceipt = receiptFor?.id === row.id ? receiptFor.model : null
+  const wasCategory = resorted?.from[row.id]
+
+  const toggleReceipt = (model: PersonalizableModel) => {
+    setPicking(null)
+    setOptInFor(null)
+    setReceiptFor(showingReceipt === model ? null : { id: row.id, model })
+  }
+  // Only for corrections this inbox knows were saved.
+  const showSentFor = (model: PersonalizableModel) =>
+    canCorrect && row.corrected[model] !== undefined ? () => toggleReceipt(model) : undefined
 
   const startCorrecting = (model: PersonalizableModel) => {
+    setReceiptFor(null)
     if (active === model) {
       setPicking(null)
       setOptInFor(null)
@@ -399,6 +436,7 @@ export function EmailDetail({ id }: { id: string }) {
     if (!next) {
       setPicking(null)
       setOptInFor(null)
+      setReceiptFor(null)
     }
   }
 
@@ -449,6 +487,18 @@ export function EmailDetail({ id }: { id: string }) {
           allowNew={picking === 'category'}
           onPick={(label) => pick(picking, label)}
           onCancel={() => setPicking(null)}
+        />
+      )
+    }
+    if (showingReceipt) {
+      return (
+        <CorrectionReceipt
+          key={`${row.id}:${showingReceipt}`}
+          messageId={row.id}
+          model={showingReceipt}
+          title={MODEL_TITLES[showingReceipt]}
+          labelFor={(value) => optionLabel(showingReceipt, value)}
+          onClose={() => setReceiptFor(null)}
         />
       )
     }
@@ -520,9 +570,19 @@ export function EmailDetail({ id }: { id: string }) {
                 />
               </button>
             </h3>
-            <span className="flex items-center gap-1.5 text-xs" style={{ color: MUTED }}>
-              <Cpu size={14} strokeWidth={1.75} aria-hidden />
-              Sorted on this device
+            <span className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs" style={{ color: MUTED }}>
+              {activeVersions.category && (
+                <span
+                  className="rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                  style={{ background: TEAL_TINT, color: TEAL_TEXT }}
+                >
+                  Your model · version {activeVersions.category}
+                </span>
+              )}
+              <span className="flex items-center gap-1.5">
+                <Cpu size={14} strokeWidth={1.75} aria-hidden />
+                Sorted on this device
+              </span>
             </span>
           </div>
 
@@ -552,15 +612,25 @@ export function EmailDetail({ id }: { id: string }) {
                   corrected={row.corrected.category !== undefined}
                   onCorrect={canCorrect ? () => startCorrecting('category') : undefined}
                   correcting={active === 'category'}
+                  onShowSent={showSentFor('category')}
+                  showingSent={showingReceipt === 'category'}
                   testId="correct-category"
                 >
                   <CategoryVerdict confidences={row.result.category.confidences} winner={row.result.category.label} />
+                  {wasCategory && (
+                    <span className="flex items-center gap-1 text-xs" style={{ color: TEAL_TEXT }}>
+                      <RotateCcw size={12} strokeWidth={2.25} aria-hidden />
+                      Was {wasCategory} before this update
+                    </span>
+                  )}
                 </VerdictCell>
                 <VerdictCell
                   title="Priority"
                   corrected={row.corrected.priority !== undefined}
                   onCorrect={canCorrect ? () => startCorrecting('priority') : undefined}
                   correcting={active === 'priority'}
+                  onShowSent={showSentFor('priority')}
+                  showingSent={showingReceipt === 'priority'}
                   testId="correct-priority"
                 >
                   <PriorityVerdict
@@ -574,6 +644,8 @@ export function EmailDetail({ id }: { id: string }) {
                   corrected={row.corrected.spam !== undefined}
                   onCorrect={canCorrect ? () => startCorrecting('spam') : undefined}
                   correcting={active === 'spam'}
+                  onShowSent={showSentFor('spam')}
+                  showingSent={showingReceipt === 'spam'}
                   testId="correct-spam"
                 >
                   <SpamVerdict label={row.result.spam.label} confidence={row.result.spam.confidence} />
