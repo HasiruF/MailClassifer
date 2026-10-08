@@ -6,6 +6,7 @@ const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:301
 export interface LastAttempt {
   version: number
   status: 'active' | 'rejected' | 'superseded'
+  correction_count: number
   metrics: { reason?: string | null; error?: string; passed?: boolean; [key: string]: unknown }
   created_at: string
 }
