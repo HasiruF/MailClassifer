@@ -89,6 +89,12 @@ export interface PriorityVocab extends CategoryVocab {
   categories: string[]
 }
 
+export interface Vocabs {
+  spam: SpamVocab
+  category: CategoryVocab
+  priority: PriorityVocab
+}
+
 // n_recipients is always numeric_cols[0] — the fitted StandardScaler's
 // mean_/scale_ were computed on log1p(n_recipients), matching
 // header_features.py's log1p_recipients (see export_onnx.py's docstring).
