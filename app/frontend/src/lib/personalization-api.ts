@@ -68,6 +68,30 @@ export function submitCorrection(payload: CorrectionPayload): Promise<Correction
   return json('/personalization/corrections', { method: 'POST', body: JSON.stringify(payload) })
 }
 
+export interface CorrectionSummary {
+  provider_message_id: string
+  model: PersonalizableModel
+  corrected_label: string
+}
+
+export interface CorrectionDetail {
+  model: PersonalizableModel
+  provider_message_id: string
+  predicted_label: string
+  predicted_confidence: number
+  corrected_label: string
+  feature_vector: SparseVector
+  created_at: string
+}
+
+export function listCorrections(): Promise<CorrectionSummary[]> {
+  return json('/personalization/corrections')
+}
+
+export function getCorrectionDetail(messageId: string): Promise<CorrectionDetail[]> {
+  return json(`/personalization/corrections/${encodeURIComponent(messageId)}`)
+}
+
 export function retrainNow(): Promise<{ scheduled: string[] }> {
   return json('/personalization/retrain', { method: 'POST' })
 }
