@@ -15,6 +15,7 @@ import {
   type SpamVocab,
   type CategoryVocab,
   type PriorityVocab,
+  type Vocabs,
 } from './features'
 import { vaderCompound } from './sentiment'
 
@@ -127,6 +128,13 @@ export function modelsLoaded(): boolean {
     categoryVocab !== null &&
     priorityVocab !== null
   )
+}
+
+// The fitted vocabularies, for turning a stored feature vector back into
+// words (src/lib/receipt.ts). Null until loadModels() has finished.
+export function getVocabs(): Vocabs | null {
+  if (!spamVocab || !categoryVocab || !priorityVocab) return null
+  return { spam: spamVocab, category: categoryVocab, priority: priorityVocab }
 }
 
 export function applyPersonalizedModels(artifacts: PersonalizedModelArtifact[]): Promise<void> {
