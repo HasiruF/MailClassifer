@@ -1,5 +1,6 @@
 import onnxruntime as ort
 
+from src.models import Correction, CorrectionModel, EmailConnection, EmailProvider, User
 from tests.fakes import DIM, patch_base_data
 
 VECTOR = {"dim": DIM, "indices": [0, 5], "values": [1.0, 5.0]}
@@ -100,3 +101,63 @@ def test_opting_out_deletes_corrections_and_models(client, connected, monkeypatc
 
 def test_unknown_model_version_is_404(client, connected):
     assert client.get("/personalization/models/category/9.onnx").status_code == 404
+
+
+def test_status_reports_how_many_corrections_an_attempt_used(client, connected, monkeypatch):
+    patch_base_data(monkeypatch)
+    enable(client)
+    for i in range(5):
+        client.post("/personalization/corrections", json=correction(f"m{i}", "Finance"))
+    attempt = client.get("/personalization/status").json()["models"][0]["last_attempt"]
+    assert attempt["correction_count"] == 5
+
+
+def test_reading_corrections_requires_a_session(client):
+    assert client.get("/personalization/corrections").status_code == 401
+    assert client.get("/personalization/corrections/m1").status_code == 401
+
+
+def test_listed_corrections_say_what_the_user_chose(client, connected, monkeypatch):
+    patch_base_data(monkeypatch)
+    enable(client)
+    client.post("/personalization/corrections", json=correction("m1", "Work"))
+    client.post("/personalization/corrections", json=correction("m2", "Finance"))
+    listed = client.get("/personalization/corrections").json()
+    assert sorted(listed, key=lambda c: c["provider_message_id"]) == [
+        {"provider_message_id": "m1", "model": "category", "corrected_label": "Work"},
+        {"provider_message_id": "m2", "model": "category", "corrected_label": "Finance"},
+    ]
+
+
+def test_a_messages_correction_detail_is_exactly_what_was_stored(client, connected, monkeypatch):
+    patch_base_data(monkeypatch)
+    enable(client)
+    client.post("/personalization/corrections", json=correction("m1", "Work"))
+    [detail] = client.get("/personalization/corrections/m1").json()
+    assert detail["model"] == "category"
+    assert detail["provider_message_id"] == "m1"
+    assert detail["predicted_label"] == "Other"
+    assert detail["predicted_confidence"] == 0.7
+    assert detail["corrected_label"] == "Work"
+    assert detail["feature_vector"] == VECTOR
+    assert "created_at" in detail
+    assert client.get("/personalization/corrections/unknown").json() == []
+
+
+def test_corrections_are_scoped_to_their_owner(client, connected, db):
+    other = User()
+    db.add(other)
+    db.flush()
+    their_connection = EmailConnection(
+        user_id=other.id, provider=EmailProvider.gmail, provider_account_id="google-sub-2",
+        provider_email="them@example.com",
+    )
+    db.add(their_connection)
+    db.flush()
+    db.add(Correction(
+        email_connection_id=their_connection.id, provider_message_id="theirs", model=CorrectionModel.category,
+        feature_vector=VECTOR, predicted_label="Other", predicted_confidence=0.5, corrected_label="Work",
+    ))
+    db.commit()
+    assert client.get("/personalization/corrections").json() == []
+    assert client.get("/personalization/corrections/theirs").json() == []

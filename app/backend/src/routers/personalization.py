@@ -18,9 +18,12 @@ from src.models import (
 )
 from src.models import Session as SessionModel
 from src.personalization import base_data, jobs
+from src.personalization.sparse import SparseVector
 from src.schemas.personalization import (
+    CorrectionDetail,
     CorrectionIn,
     CorrectionOut,
+    CorrectionSummary,
     LastAttempt,
     ManifestEntry,
     ModelStatus,
@@ -123,6 +126,48 @@ def submit_correction(
     return CorrectionOut(retrain_scheduled=scheduled, corrections_until_retrain=remaining)
 
 
+def _user_corrections(user_id: uuid.UUID):
+    return select(Correction).join(EmailConnection, Correction.email_connection_id == EmailConnection.id).where(
+        EmailConnection.user_id == user_id
+    )
+
+
+# What the user chose per email, so the inbox can show corrections again
+# after a reload. No feature vectors: the list stays small.
+@router.get("/corrections", response_model=list[CorrectionSummary])
+def list_corrections(user: User = Depends(_current_user), db: OrmSession = Depends(get_db)) -> list[CorrectionSummary]:
+    rows = db.scalars(_user_corrections(user.id).order_by(Correction.created_at)).all()
+    return [
+        CorrectionSummary(provider_message_id=r.provider_message_id, model=r.model.value, corrected_label=r.corrected_label)
+        for r in rows
+    ]
+
+
+# Everything stored for one email's corrections, exactly as saved: the
+# receipt the inbox decodes to show what was sent.
+@router.get("/corrections/{provider_message_id}", response_model=list[CorrectionDetail])
+def get_message_corrections(
+    provider_message_id: str, user: User = Depends(_current_user), db: OrmSession = Depends(get_db)
+) -> list[CorrectionDetail]:
+    rows = db.scalars(
+        _user_corrections(user.id)
+        .where(Correction.provider_message_id == provider_message_id)
+        .order_by(Correction.model)
+    ).all()
+    return [
+        CorrectionDetail(
+            model=r.model.value,
+            provider_message_id=r.provider_message_id,
+            predicted_label=r.predicted_label,
+            predicted_confidence=r.predicted_confidence,
+            corrected_label=r.corrected_label,
+            feature_vector=SparseVector(**r.feature_vector),
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+
 @router.post("/retrain", response_model=RetrainOut)
 def retrain_now(
     background: BackgroundTasks, user: User = Depends(_current_user), db: OrmSession = Depends(get_db)
@@ -147,7 +192,11 @@ def get_status(user: User = Depends(_current_user), db: OrmSession = Depends(get
             corrections_until_retrain=jobs.corrections_until_retrain(db, user.id, model),
             running=jobs.is_running(user.id, model),
             last_attempt=LastAttempt(
-                version=last.version, status=last.status.value, metrics=last.metrics, created_at=last.created_at
+                version=last.version,
+                status=last.status.value,
+                correction_count=last.correction_count,
+                metrics=last.metrics,
+                created_at=last.created_at,
             ) if last else None,
         ))
     custom_labels = db.scalars(
