@@ -75,8 +75,7 @@ classification engine) is built, tested, and committed; a full inbox UI sits
 on top of it, committed; live Gmail fetch+classify sits on top of *that*,
 working but not yet committed; Phase 2 (FastAPI+Postgres backend, opt-in
 personalization, plus a minimal Gmail token-holder for persistent login) is
-not started. No `app/README.md` exists — design/plan docs live under
-`docs/superpowers/`.
+not started. No `app/README.md` exists.
 
 ## Datasets
 
@@ -508,8 +507,6 @@ numeric column, not yet wired in.
 
 ## Application layer (`app/`)
 
-Design doc: `docs/superpowers/specs/2026-08-10-smart-email-app-design.md`.
-Implementation plan (Phase 1): `docs/superpowers/plans/2026-08-10-core-classification-pipeline.md`.
 An earlier Vite+React attempt was deleted and restarted deliberately on
 Next.js — see the design doc §1 for why (that attempt did prove `skl2onnx`
 can't convert `char_wb` TF-IDF, which is why the TF-IDF math below is
@@ -669,9 +666,6 @@ Phase 2 backend. Do not default to storing a refresh token client-side.
 
 ### Personalization (corrections + per-user retraining) — built
 
-Spec: `docs/superpowers/specs/2026-09-29-personalization-design.md`.
-Plan: `docs/superpowers/plans/2026-09-29-personalization.md`.
-
 - Opt-in per user. When on, correcting a label in the email detail view
   sends the email's **sparse feature vector** (never the text) to the
   backend. Custom labels are allowed for category only.
@@ -703,9 +697,6 @@ Plan: `docs/superpowers/plans/2026-09-29-personalization.md`.
   `app/frontend`).
 
 ### Show the work (receipt, retrain report card, re-sorted view) — built
-
-Spec: `docs/superpowers/specs/2026-10-08-show-the-work-design.md`.
-Plan: `docs/superpowers/plans/2026-10-08-show-the-work.md`.
 
 - **What was sent?** A corrected label in the email view links to a receipt
   of exactly what the server stored for that correction

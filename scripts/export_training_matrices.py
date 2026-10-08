@@ -1,8 +1,7 @@
 """
 export_training_matrices.py
 ───────────────────────────
-One-time precompute for per-user personalization retraining (see
-docs/superpowers/specs/2026-09-29-personalization-design.md §4.1).
+One-time precompute for per-user personalization retraining.
 
 For spam, category and priority this rebuilds the exact rows each production
 model was fit on, passes them through that production pipeline's
