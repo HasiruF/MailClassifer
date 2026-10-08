@@ -84,20 +84,23 @@ function ReportCheckRow({ check }: { check: ReportCheck }) {
   const failed = !check.passed
   return (
     <li className="flex flex-col gap-1">
-      <div className="flex items-baseline justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <span
-          className={`flex items-center gap-1.5 text-[13px] ${failed ? 'font-semibold' : 'font-medium'}`}
+          className={`flex min-w-0 items-start gap-1.5 text-[13px] leading-snug ${failed ? 'font-semibold' : 'font-medium'}`}
           style={{ color: failed ? CORAL_TEXT : INK }}
         >
           {failed ? (
-            <X size={13} strokeWidth={2.5} aria-hidden />
+            <X size={13} strokeWidth={2.5} className="mt-[3px] shrink-0" aria-hidden />
           ) : (
-            <Check size={13} strokeWidth={2.5} style={{ color: TEAL_TEXT }} aria-hidden />
+            <Check size={13} strokeWidth={2.5} className="mt-[3px] shrink-0" style={{ color: TEAL_TEXT }} aria-hidden />
           )}
           <span className="sr-only">{failed ? 'Failed:' : 'Passed:'}</span>
           {check.label}
         </span>
-        <span className="font-mono text-xs font-medium" style={{ color: failed ? CORAL_TEXT : INK }}>
+        <span
+          className="shrink-0 pt-px font-mono text-xs font-medium whitespace-nowrap"
+          style={{ color: failed ? CORAL_TEXT : INK }}
+        >
           {check.value}
         </span>
       </div>
@@ -268,7 +271,9 @@ export function Sidebar() {
       <aside
         aria-label="Mailboxes"
         className={`${
-          navOpen ? 'fixed inset-y-0 left-0 z-40 flex w-[280px]' : 'hidden md:flex md:w-[248px]'
+          // relative: absolutely positioned children (e.g. sr-only labels)
+          // must be clipped by this scroll area, not stretch the page.
+          navOpen ? 'fixed inset-y-0 left-0 z-40 flex w-[280px]' : 'hidden md:relative md:flex md:w-[248px]'
         } shrink-0 flex-col gap-5 overflow-y-auto px-3.5 pt-5 pb-4 [&>*]:shrink-0`}
         style={{ background: SIDEBAR_BG, borderRight: `1px solid ${SIDEBAR_LINE}` }}
       >
