@@ -52,3 +52,6 @@ app/frontend/.diag/
 
 # Personalization base training matrices (scripts/export_training_matrices.py)
 app/backend/training_data/
+
+# Planning notes (local only)
+docs/superpowers/
