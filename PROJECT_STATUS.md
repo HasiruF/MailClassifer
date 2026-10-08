@@ -702,6 +702,33 @@ Plan: `docs/superpowers/plans/2026-09-29-personalization.md`.
   `node scripts/personalization_e2e.mjs <session id>` (both from
   `app/frontend`).
 
+### Show the work (receipt, retrain report card, re-sorted view) — built
+
+Spec: `docs/superpowers/specs/2026-10-08-show-the-work-design.md`.
+Plan: `docs/superpowers/plans/2026-10-08-show-the-work.md`.
+
+- **What was sent?** A corrected label in the email view links to a receipt
+  of exactly what the server stored for that correction
+  (`GET /personalization/corrections/{message_id}`), decoded on the device
+  (`src/lib/receipt.ts`) into the words and letter groups the vector counted,
+  with their weights, plus the header/style signals unscaled to plain values.
+- **Retrain report card.** The sidebar explains the latest attempt as the
+  gate's checks (`src/lib/retrain-report.ts`, mirroring `gate.py`), with the
+  failing one marked when a version is rejected. `last_attempt` now carries
+  `correction_count`.
+- **Re-sorted by your model.** After a retrain loads a new model, emails whose
+  model category changed (and that the user hadn't corrected) get a "was X"
+  tag, a banner counts them with "Show only these", and the sorting panel
+  shows the active personal model version.
+- Corrections now survive a reload: the inbox restores them from
+  `GET /personalization/corrections` when it loads.
+- **Privacy finding the receipt makes visible:** the category and priority
+  vectors include char_wb letter groups, not only words. A real LinkedIn
+  correction carried 26 words but 524 letter groups, which can hint at words
+  outside the word vocabulary (e.g. names). The privacy caveat above
+  understates this; dropping or coarsening the char features before upload
+  is a follow-up.
+
 ### Not started
 
 - **Phase 2 (backend), remaining:** the analytics dashboard backend. The
